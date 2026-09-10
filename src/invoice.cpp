@@ -37,6 +37,23 @@ QString clean(const QString &raw)
     return raw.trimmed();
 }
 
+/// Collapses a value the schema declared as "one line" into one line.
+///
+/// The model happily returns four lines of address plus a parenthetical about
+/// where it found the footer. Nobody can display that, so only the first line
+/// survives and the rest is dropped rather than wrapped.
+QString singleLine(const QString &raw, int limit = 160)
+{
+    QString text = raw.simplified();
+    const int breakAt = text.indexOf(QLatin1Char('\n'));
+    if (breakAt >= 0)
+        text = text.left(breakAt);
+    text = text.trimmed();
+    if (text.size() > limit)
+        text = text.left(limit).trimmed() + QStringLiteral("...");
+    return text;
+}
+
 /// Formats an ISO date, rejecting impossible calendar values.
 QString buildDate(int year, int month, int day)
 {
@@ -292,7 +309,7 @@ Invoice Invoice::fromJson(const QJsonObject &object)
 
     Invoice invoice;
     invoice.vendor = text("vendor");
-    invoice.vendorAddress = text("vendor_address");
+    invoice.vendorAddress = singleLine(text("vendor_address"));
     invoice.invoiceNumber = text("invoice_number");
     invoice.date = normaliseDate(text("date"));
     invoice.dueDate = normaliseDate(text("due_date"));

@@ -36,6 +36,7 @@ endif()
 # ---------------------------------------------------------------------------
 
 add_library(invoicedrop-ai STATIC
+    analysis.cpp
     invoice.cpp
     ollama.cpp
 )

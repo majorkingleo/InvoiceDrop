@@ -300,10 +300,11 @@ PIX *renderPage(fz_context *ctx,
     return pix;
 }
 
-/// Turns a rendered page into a PageImage plus, optionally, OCR text.
-/// Returns the JPEG encoded page in `image` and the text in `text`.
-bool finishPage(PIX *pagePix, int index, const ReadOptions &options, PageImage *image, QString *text,
-                QStringList *notes)
+/// Turns a rendered page into the raster half of a DocumentPage. OCR text, when
+/// it is wanted, is returned separately so the caller can decide its precedence
+/// against the text layer.
+bool finishPage(PIX *pagePix, int index, const ReadOptions &options, DocumentPage *page,
+                QString *ocrText, QStringList *notes)
 {
     PIX *rgb = ImageOps::toRgb32(pagePix);
     if (!rgb) {
@@ -326,19 +327,18 @@ bool finishPage(PIX *pagePix, int index, const ReadOptions &options, PageImage *
         if (jpeg.isEmpty()) {
             notes->append(QStringLiteral("page %1: %2").arg(index + 1).arg(encodeError));
         } else {
-            image->index = index;
-            image->jpeg = jpeg;
-            image->width = pixGetWidth(scaled);
-            image->height = pixGetHeight(scaled);
+            page->jpeg = jpeg;
+            page->width = pixGetWidth(scaled);
+            page->height = pixGetHeight(scaled);
             usable = true;
         }
     }
 
-    if (options.want != Want::Images && Ocr::available(options.ocr)) {
+    if (options.want != Want::Images && Ocr::available(options.ocr) && ocrText) {
         QString ocrError;
         const QString recognized = Ocr::imageToText(scaled, options.ocr, notes, &ocrError);
         if (!recognized.isEmpty()) {
-            *text = recognized;
+            *ocrText = recognized;
             usable = true;
         } else if (!ocrError.isEmpty()) {
             notes->append(QStringLiteral("page %1 OCR: %2").arg(index + 1).arg(ocrError));
@@ -397,12 +397,26 @@ bool read(const QString &path, const ReadOptions &options, Document *document)
         }
 
         if (document->hasTextLayer && options.want != Want::Images) {
+            for (int i = 0; i < pagesToRead; ++i) {
+                DocumentPage page;
+                page.index = i;
+                page.fromTextLayer = true;
+                page.text = pageTexts.at(i);
+                document->pages.append(page);
+            }
             document->text = pageTexts.join(QStringLiteral("\n\n")).trimmed();
             document->notes.append(QStringLiteral("text layer used, nothing rasterised"));
             return true;
         }
 
         if (options.want == Want::Text) {
+            for (int i = 0; i < pagesToRead; ++i) {
+                DocumentPage page;
+                page.index = i;
+                page.fromTextLayer = true;
+                page.text = pageTexts.at(i);
+                document->pages.append(page);
+            }
             document->text = pageTexts.join(QStringLiteral("\n\n")).trimmed();
             if (document->text.isEmpty())
                 document->error = QStringLiteral("no text layer and rasterising was not allowed");
@@ -410,30 +424,49 @@ bool read(const QString &path, const ReadOptions &options, Document *document)
         }
 
         for (int i = 0; i < pagesToRead; ++i) {
+            DocumentPage page;
+            page.index = i;
+
             QString renderError;
             PIX *pagePix = renderPage(ctx, doc.handle, i, options, &document->notes, &renderError);
             if (!pagePix) {
                 document->notes.append(renderError);
+                // Keep the page in the list even when it failed, so the bill
+                // numbers the user wrote down still line up with the output.
+                page.text = pageTexts.at(i);
+                page.fromTextLayer = !page.text.isEmpty();
+                document->pages.append(page);
                 continue;
             }
 
-            PageImage image;
-            QString text;
-            if (finishPage(pagePix, i, options, &image, &text, &document->notes)) {
-                if (!image.jpeg.isEmpty())
-                    document->pages.append(image);
-                if (!text.isEmpty())
-                    pageTexts[i] = text;
-            }
+            QString ocrText;
+            finishPage(pagePix, i, options, &page, &ocrText, &document->notes);
             pixDestroy(&pagePix);
+
+            // OCR wins over a text layer fragment that was too short to be
+            // trusted, which is the same precedence the merged text used.
+            if (!ocrText.isEmpty()) {
+                page.text = ocrText;
+                page.fromTextLayer = false;
+            } else {
+                page.text = pageTexts.at(i);
+                page.fromTextLayer = !page.text.isEmpty();
+            }
+
+            document->pages.append(page);
         }
 
-        if (document->pages.isEmpty() && pageTexts.join(QString()).trimmed().isEmpty()) {
+        if (document->pages.isEmpty()) {
             document->error = QStringLiteral("no page could be rendered or read");
             return false;
         }
 
-        document->text = pageTexts.join(QStringLiteral("\n\n")).trimmed();
+        QStringList collected;
+        for (const DocumentPage &page : std::as_const(document->pages)) {
+            if (!page.text.trimmed().isEmpty())
+                collected.append(page.text.trimmed());
+        }
+        document->text = collected.join(QStringLiteral("\n\n"));
         if (!document->text.isEmpty())
             document->notes.append(
                 QStringLiteral("text recovered by OCR (%1)").arg(options.ocr.languages));

@@ -31,18 +31,18 @@ void readImage(const QString &path, const ReadOptions &options, Document *docume
         return;
     }
 
+    DocumentPage page;
+    page.index = 0;
+
     if (options.want != Want::Text) {
         QString encodeError;
         const QByteArray jpeg = ImageOps::toJpeg(pix, options.jpegQuality, &encodeError);
         if (jpeg.isEmpty()) {
             document->notes.append(encodeError);
         } else {
-            PageImage page;
-            page.index = 0;
             page.jpeg = jpeg;
             page.width = pixGetWidth(pix);
             page.height = pixGetHeight(pix);
-            document->pages.append(page);
         }
     }
 
@@ -50,7 +50,7 @@ void readImage(const QString &path, const ReadOptions &options, Document *docume
         QString ocrError;
         const QString text = Ocr::imageToText(pix, options.ocr, &document->notes, &ocrError);
         if (!text.isEmpty()) {
-            document->text = text;
+            page.text = text;
             document->notes.append(
                 QStringLiteral("text recovered by OCR (%1)").arg(options.ocr.languages));
         } else if (!ocrError.isEmpty()) {
@@ -62,8 +62,11 @@ void readImage(const QString &path, const ReadOptions &options, Document *docume
 
     pixDestroy(&pix);
 
-    if (document->pages.isEmpty() && document->text.isEmpty())
+    if (page.jpeg.isEmpty() && page.text.isEmpty())
         document->error = QStringLiteral("nothing usable could be read from the image");
+
+    document->pages.append(page);
+    document->text = page.text;
 }
 
 } // namespace

@@ -1,0 +1,18 @@
+{
+    "bills": [
+        {
+            "bill": 1,
+            "vendor": "BERTAHÜTTE",
+            "date": "2025-07-22",
+            "gross_total": 732.00,
+            "currency": "EUR"
+        },
+        {
+            "bill": 2,
+            "vendor": "BERTAHÜTTE",
+            "date": "2025-07-22",
+            "gross_total": 24.20,
+            "currency": "EUR"
+        }
+    ]
+}

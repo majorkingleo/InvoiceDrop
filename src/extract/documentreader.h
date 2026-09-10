@@ -14,10 +14,16 @@ enum class DocumentKind {
     Image,
 };
 
-/// One rasterised page, already downscaled and JPEG encoded.
-struct PageImage {
-    int index = 0;
-    QByteArray jpeg;
+/// One page of a document.
+///
+/// A file is not a bill. A collection PDF holds twenty receipts and a two page
+/// scan holds two of them, so every page carries its own text and its own raster
+/// and is analysed on its own.
+struct DocumentPage {
+    int index = 0;              ///< zero based page number, in paper order
+    bool fromTextLayer = false; ///< the text came from the PDF, not from OCR
+    QString text;
+    QByteArray jpeg;            ///< empty when the page was not rasterised
     int width = 0;
     int height = 0;
 };
@@ -92,8 +98,14 @@ struct Document {
     QString path;
     DocumentKind kind = DocumentKind::Unknown;
     bool hasTextLayer = false;
+
+    /// Every page that was read, in order, whether or not it was rasterised.
+    QVector<DocumentPage> pages;
+
+    /// Concatenation of the page texts, for `--extract-only` and for reading
+    /// logs. Analysis uses the per page text instead.
     QString text;
-    QVector<PageImage> pages;
+
     QStringList notes;
     QString error;
     qint64 elapsedMs = 0;

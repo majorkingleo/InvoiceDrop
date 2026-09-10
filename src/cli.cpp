@@ -1,5 +1,6 @@
 #include "cli.h"
 
+#include "analysis.h"
 #include "extract/documentreader.h"
 #include "invoice.h"
 #include "ollama.h"
@@ -47,32 +48,7 @@ QString indentNotes(const QStringList &notes)
     return notes.join(QStringLiteral("\n             "));
 }
 
-/// True when the raster is too coarse to carry the text the model claims to
-/// have read.
-///
-/// Measured: a 174 px wide receipt photo makes every model invent a vendor, a
-/// date and a total, complete with a currency that is not on the paper. Numbers
-/// like that are worse than no numbers, so they get flagged rather than printed
-/// as fact.
-QString qualityWarning(const Extract::Document &document)
-{
-    if (document.hasTextLayer || document.pages.isEmpty())
-        return {};
-
-    int shortest = std::numeric_limits<int>::max();
-    for (const Extract::PageImage &page : document.pages)
-        shortest = qMin(shortest, qMin(page.width, page.height));
-
-    constexpr int kLegibleShortEdge = 400;
-    if (shortest == std::numeric_limits<int>::max() || shortest >= kLegibleShortEdge)
-        return {};
-
-    return QStringLiteral("the source is only %1 px across, so the model had to guess; "
-                          "treat the values as unverified")
-        .arg(shortest);
-}
-
-void printAnalysisLine(const QString &path, const Invoice &invoice)
+void printAnalysisLine(const QString &label, const Invoice &invoice)
 {
     const QString amount = invoice.grossTotal.has_value()
         ? QLocale::system().toString(*invoice.grossTotal, 'f', 2) + QLatin1Char(' ')
@@ -82,8 +58,7 @@ void printAnalysisLine(const QString &path, const Invoice &invoice)
     const QString vendor = invoice.vendor.isEmpty() ? QStringLiteral("-") : invoice.vendor;
     const QString date = invoice.date.isEmpty() ? QStringLiteral("-") : invoice.date;
 
-    out() << QFileInfo(path).fileName() << "  " << vendor << "  " << date << "  " << amount
-          << Qt::endl;
+    out() << label << "  " << vendor << "  " << date << "  " << amount << Qt::endl;
     out().flush();
 }
 
@@ -98,10 +73,19 @@ void printHuman(const Extract::Document &document, const Extract::ReadOptions &o
         stream << "  kind       " << Extract::kindName(document.kind) << Qt::endl;
         stream << "  text layer " << (document.hasTextLayer ? "yes" : "no") << Qt::endl;
         stream << "  text       " << document.text.size() << " characters" << Qt::endl;
-        if (!document.pages.isEmpty()) {
-            const Extract::PageImage &first = document.pages.first();
-            stream << "  pages      " << document.pages.size() << " (" << first.width << "x"
-                   << first.height << " -> " << options.longEdge << " px long edge)" << Qt::endl;
+        const Extract::DocumentPage *raster = nullptr;
+        for (const Extract::DocumentPage &page : std::as_const(document.pages)) {
+            if (!page.jpeg.isEmpty()) {
+                raster = &page;
+                break;
+            }
+        }
+        if (raster) {
+            stream << "  pages      " << document.pages.size() << " (" << raster->width << "x"
+                   << raster->height << " -> " << options.longEdge << " px long edge)" << Qt::endl;
+        } else if (!document.pages.isEmpty()) {
+            stream << "  pages      " << document.pages.size() << " (text layer only)"
+                   << Qt::endl;
         }
     }
 
@@ -117,25 +101,20 @@ void printHuman(const Extract::Document &document, const Extract::ReadOptions &o
     stream.flush();
 }
 
-QJsonObject toJson(const Extract::Document &document,
-                   const Invoice *invoice,
-                   bool withText,
-                   const QString &failure,
-                   const QString &warning)
+/// JSON for the extraction only view, where no model was consulted.
+QJsonObject extractionJson(const Extract::Document &document, bool withText)
 {
     QJsonObject object;
     object.insert(QStringLiteral("file"), QFileInfo(document.path).fileName());
     object.insert(QStringLiteral("path"), document.path);
     object.insert(QStringLiteral("kind"), Extract::kindName(document.kind));
-    object.insert(QStringLiteral("status"), failure.isEmpty() ? QStringLiteral("ok")
-                                                               : QStringLiteral("error"));
-    if (!failure.isEmpty())
-        object.insert(QStringLiteral("error"), failure);
-    if (!warning.isEmpty())
-        object.insert(QStringLiteral("quality_warning"), warning);
+    object.insert(QStringLiteral("status"), document.ok() ? QStringLiteral("ok")
+                                                           : QStringLiteral("error"));
+    if (!document.error.isEmpty())
+        object.insert(QStringLiteral("error"), document.error);
 
     object.insert(QStringLiteral("has_text_layer"), document.hasTextLayer);
-    object.insert(QStringLiteral("page_count"), document.pages.size());
+    object.insert(QStringLiteral("bill_count"), document.pages.size());
     object.insert(QStringLiteral("text_chars"), static_cast<qint64>(document.text.size()));
     object.insert(QStringLiteral("elapsed_ms"), document.elapsedMs);
 
@@ -147,12 +126,37 @@ QJsonObject toJson(const Extract::Document &document,
     if (withText)
         object.insert(QStringLiteral("text"), document.text);
 
-    // Flat, so `jq '.vendor, .gross_total'` works as documented.
-    if (invoice) {
-        const QJsonObject fields = invoice->toJson();
-        for (auto entry = fields.constBegin(); entry != fields.constEnd(); ++entry)
-            object.insert(entry.key(), entry.value());
-    }
+    return object;
+}
+
+/// JSON for one analysed bill. The invoice fields sit at the top level, so
+/// `jq '.vendor'` works without digging.
+QJsonObject billJson(const BillResult &bill)
+{
+    QJsonObject object;
+    object.insert(QStringLiteral("file"), QFileInfo(bill.path).fileName());
+    object.insert(QStringLiteral("path"), bill.path);
+    object.insert(QStringLiteral("bill"), bill.page);
+    object.insert(QStringLiteral("bill_count"), bill.pageCount);
+    object.insert(QStringLiteral("status"), bill.ok ? QStringLiteral("ok")
+                                                     : QStringLiteral("error"));
+    if (!bill.error.isEmpty())
+        object.insert(QStringLiteral("error"), bill.error);
+    if (!bill.qualityWarning.isEmpty())
+        object.insert(QStringLiteral("quality_warning"), bill.qualityWarning);
+
+    object.insert(QStringLiteral("has_text_layer"), bill.fromTextLayer);
+    object.insert(QStringLiteral("extract_ms"), bill.extractMs);
+    object.insert(QStringLiteral("inference_ms"), bill.inferMs);
+
+    QJsonArray notes;
+    for (const QString &note : bill.notes)
+        notes.append(note);
+    object.insert(QStringLiteral("notes"), notes);
+
+    const QJsonObject fields = bill.invoice.toJson();
+    for (auto entry = fields.constBegin(); entry != fields.constEnd(); ++entry)
+        object.insert(entry.key(), entry.value());
 
     return object;
 }
@@ -166,7 +170,9 @@ bool dumpPages(const Extract::Document &document, const QString &directory, QStr
     }
 
     const QString base = QFileInfo(document.path).completeBaseName();
-    for (const Extract::PageImage &page : document.pages) {
+    for (const Extract::DocumentPage &page : std::as_const(document.pages)) {
+        if (page.jpeg.isEmpty())
+            continue;
         const QString name = QStringLiteral("%1-p%2.jpg").arg(base).arg(page.index + 1);
         QFile file(target.filePath(name));
         if (!file.open(QIODevice::WriteOnly)) {
@@ -362,83 +368,83 @@ int runCli(const QStringList &arguments)
     bool allOk = true;
 
     for (const QString &file : files) {
-        const Extract::Document document = Extract::readDocument(file, options);
-
-        // An extraction failure is fatal for the file: there is nothing left to
-        // send to the model.
-        if (!document.ok()) {
-            allOk = false;
-            if (asJson)
-                results.append(toJson(document, nullptr, withText, document.error, QString()));
-            else
-                err() << QFileInfo(file).fileName() << ": " << document.error << Qt::endl;
-            err().flush();
-            continue;
-        }
-
-        if (parser.isSet(dumpImages) && !document.pages.isEmpty()) {
-            QStringList problems;
-            dumpPages(document, parser.value(dumpImages), &problems);
-            for (const QString &problem : problems)
-                err() << "warning: " << problem << Qt::endl;
-            err().flush();
+        // --dump-images works off the raw extraction, so it needs the document
+        // rather than the analysed bills. Only the debug flag pays for the
+        // second read.
+        if (parser.isSet(dumpImages)) {
+            const Extract::Document document = Extract::readDocument(file, options);
+            if (document.ok()) {
+                QStringList problems;
+                dumpPages(document, parser.value(dumpImages), &problems);
+                for (const QString &problem : problems)
+                    err() << "warning: " << problem << Qt::endl;
+                err().flush();
+            }
         }
 
         if (extractOnlyMode) {
+            const Extract::Document document = Extract::readDocument(file, options);
+            if (!document.ok()) {
+                allOk = false;
+                if (asJson)
+                    results.append(extractionJson(document, withText));
+                else
+                    err() << QFileInfo(file).fileName() << ": " << document.error << Qt::endl;
+                err().flush();
+                continue;
+            }
             if (asJson)
-                results.append(toJson(document, nullptr, withText, QString(), QString()));
+                results.append(extractionJson(document, withText));
             else
                 printHuman(document, options, withText);
             continue;
         }
 
-        QList<QByteArray> pages;
-        pages.reserve(document.pages.size());
-        for (const Extract::PageImage &page : document.pages)
-            pages.append(page.jpeg);
+        // One record per bill, and a bill is one page.
+        const QVector<BillResult> bills = analyseFile(file, options, client);
 
-        Invoice invoice;
-        QString analysisError;
-        const bool analysed = client.analyse(document.text, pages, &invoice, &analysisError);
-        if (!analysed)
-            allOk = false;
+        for (const BillResult &bill : bills) {
+            if (!bill.ok)
+                allOk = false;
 
-        const QString warning = analysed ? qualityWarning(document) : QString();
-
-        if (verbose) {
-            err() << QFileInfo(file).fileName() << ": " << document.pages.size() << " page image(s)"
-                  << ", " << document.text.size() << " text chars"
-                  << ", extract " << document.elapsedMs << " ms"
-                  << ", model " << client.lastInferenceMs() << " ms" << Qt::endl;
-            for (const QString &note : document.notes)
-                err() << "  note: " << note << Qt::endl;
-            if (!analysisError.isEmpty())
-                err() << "  problem: " << analysisError << Qt::endl;
-            err().flush();
-        }
-
-        if (asJson) {
-            results.append(toJson(document, &invoice, withText, analysisError, warning));
-        } else {
-            printAnalysisLine(file, invoice);
-            if (!warning.isEmpty()) {
-                err() << QFileInfo(file).fileName() << ": warning: " << warning << Qt::endl;
+            if (verbose) {
+                err() << bill.label() << ": extract " << bill.extractMs << " ms"
+                      << ", model " << bill.inferMs << " ms"
+                      << (bill.fromTextLayer ? ", text layer" : ", raster") << Qt::endl;
+                for (const QString &note : bill.notes)
+                    err() << "  note: " << note << Qt::endl;
+                if (!bill.qualityWarning.isEmpty())
+                    err() << "  warning: " << bill.qualityWarning << Qt::endl;
+                if (!bill.error.isEmpty())
+                    err() << "  problem: " << bill.error << Qt::endl;
                 err().flush();
             }
-            if (!analysed) {
-                err() << QFileInfo(file).fileName() << ": " << analysisError << Qt::endl;
-                err().flush();
+
+            if (asJson) {
+                results.append(billJson(bill));
+            } else {
+                printAnalysisLine(bill.label(), bill.invoice);
+                if (!bill.qualityWarning.isEmpty()) {
+                    err() << bill.label() << ": warning: " << bill.qualityWarning << Qt::endl;
+                    err().flush();
+                }
+                if (!bill.ok) {
+                    err() << bill.label() << ": " << bill.error << Qt::endl;
+                    err().flush();
+                }
             }
         }
     }
 
     if (asJson) {
-        QJsonDocument payload;
-        if (results.size() == 1)
-            payload.setObject(results.first().toObject());
-        else
-            payload.setArray(results);
-        out() << QString::fromUtf8(payload.toJson(QJsonDocument::Compact)) << Qt::endl;
+        // One object per line, always, whatever the number of files. An array
+        // for several files and a bare object for one would make `jq '.vendor'`
+        // work interactively and fail in a loop, which is the kind of difference
+        // nobody remembers.
+        for (const QJsonValue &entry : results) {
+            const QJsonDocument document(entry.toObject());
+            out() << QString::fromUtf8(document.toJson(QJsonDocument::Compact)) << Qt::endl;
+        }
         out().flush();
     }
 

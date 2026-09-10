@@ -25,6 +25,23 @@ target_link_libraries(tst_invoice
 
 add_test(NAME invoice COMMAND tst_invoice)
 
+# Checks what the model read, against the .expected-result.json files next to
+# the documents. Needs a running Ollama and skips itself without one.
+qt_add_executable(tst_bills tst_bills.cpp)
+
+target_link_libraries(tst_bills
+    PRIVATE
+        invoicedrop-ai
+        Qt6::Test
+)
+
+add_test(NAME bills COMMAND tst_bills)
+
+set_tests_properties(bills PROPERTIES
+    LABELS "integration"
+    TIMEOUT 1800
+)
+
 # Run from the project root so tests/testdata is reachable by relative path as
 # well as through QFINDTESTDATA.
 set_tests_properties(documentreader PROPERTIES
