@@ -122,8 +122,14 @@ Routing inside `read()`:
 | Input | Route |
 |-------|-------|
 | PDF, text layer ≥ 120 chars/page | MuPDF `fz_stext_page` text, no raster |
-| PDF, no text layer | MuPDF renders leading pages to JPEG, Leptonica downscales, Tesseract OCRs |
-| JPEG/PNG/TIFF/WebP/BMP | Leptonica `pixRead`, EXIF orientation, downscale, optional OCR |
+| PDF, no text layer | MuPDF renders the leading pages, Leptonica downscales, Tesseract OCRs when `--ocr` is set |
+| JPEG/PNG/TIFF/WebP/BMP | Leptonica `pixRead`, EXIF orientation, downscale, OCR only with `--ocr` |
+
+Two resolution rules protect legibility. A narrow page, such as an 82 mm receipt
+roll, is rendered at a higher dpi until its short edge reaches `minShortEdge`,
+because 200 dpi leaves it 440 px across. The downscale then refuses to shrink
+below that same floor, so the long-edge limit cannot undo the render. On the
+other side, `maxPixels` caps a poster-sized sheet.
 
 `Document` is a value type and crosses the thread boundary by copy. There is no
 serialization format to version, because there is no pipe.

@@ -155,6 +155,20 @@ int runCli(const QStringList &arguments)
     const QCommandLineOption languages(QStringLiteral("lang"),
                                        QStringLiteral("Tesseract language pack, for example deu+eng."),
                                        QStringLiteral("langs"), QStringLiteral("deu+eng"));
+    const QCommandLineOption ocrShortEdge(
+        QStringLiteral("ocr-short-edge"),
+        QStringLiteral("Short edge OCR scales to before recognising. Tiny scans are magnified."),
+        QStringLiteral("px"), QStringLiteral("1400"));
+    const QCommandLineOption psm(QStringLiteral("psm"),
+                                 QStringLiteral("Tesseract page segmentation mode, 0 to 13."),
+                                 QStringLiteral("mode"), QStringLiteral("6"));
+    const QCommandLineOption noNormalise(
+        QStringLiteral("no-normalise"),
+        QStringLiteral("Skip adaptive contrast normalisation before OCR."));
+    const QCommandLineOption ocr(
+        QStringLiteral("ocr"),
+        QStringLiteral("Run Tesseract over rasterised pages. Off by default: it helps clean "
+                       "scans and actively hurts on photographed receipts."));
     const QCommandLineOption dumpImages(
         QStringLiteral("dump-images"),
         QStringLiteral("Write the rasterised pages into this directory, for inspection."),
@@ -168,6 +182,10 @@ int runCli(const QStringList &arguments)
     parser.addOption(pages);
     parser.addOption(longEdge);
     parser.addOption(languages);
+    parser.addOption(ocrShortEdge);
+    parser.addOption(psm);
+    parser.addOption(noNormalise);
+    parser.addOption(ocr);
     parser.addOption(dumpImages);
     parser.addPositionalArgument(QStringLiteral("files"),
                                  QStringLiteral("Invoice files to read."),
@@ -200,7 +218,11 @@ int runCli(const QStringList &arguments)
     options.dpi = qMax(30, parser.value(dpi).toInt());
     options.maxPages = qMax(1, parser.value(pages).toInt());
     options.longEdge = qMax(200, parser.value(longEdge).toInt());
-    options.languages = parser.value(languages);
+    options.ocr.languages = parser.value(languages);
+    options.ocr.enabled = parser.isSet(ocr);
+    options.ocr.targetShortEdge = parser.value(ocrShortEdge).toInt();
+    options.ocr.pageSegMode = qBound(0, parser.value(psm).toInt(), 13);
+    options.ocr.normalise = !parser.isSet(noNormalise);
 
     if (parser.isSet(textOnly))
         options.want = Extract::Want::Text;

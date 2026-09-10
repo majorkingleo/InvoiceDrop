@@ -20,8 +20,8 @@ file watcher. Non-goals until phase 5: no QML at all.
 
 | Phase | Deliverable | Interface | Status |
 |-------|-------------|-----------|--------|
-| 0 | Skeleton that compiles, prints version | `invoicedrop --version` | to do |
-| 1 | Extraction only, no AI | `invoicedrop --extract-only f.pdf` | to do |
+| 0 | Skeleton that compiles, prints version | `invoicedrop --version` | **done** |
+| 1 | Extraction only, no AI | `invoicedrop --extract-only f.pdf` | **done** |
 | 2 | **MVP**: shop, date, sum from a real invoice | `InvoiceDrop bill1.pdf` | to do |
 | 3 | SQLite store, hash cache, history | `invoicedrop history` | to do |
 | 4 | Daemon: inbox watch, DBus, notifications | `invoicedrop daemon` | to do |
@@ -135,6 +135,46 @@ invoicedrop --extract-only --pages 2 --dpi 150 tests/testdata/*.pdf
 Done when every file in `tests/testdata/` yields text or page images and the
 timing per page is recorded in the notes output. **If OCR quality on a scan is
 bad, fix it here** — do not carry it into phase 2 and blame the model.
+
+### What phase 1 actually found
+
+All twelve documents in `tests/testdata/` are read, the suite runs in 0.37 s and
+nothing is skipped. Two real defects surfaced, both of which would have been
+blamed on the model in phase 2:
+
+1. **The page was rendered with the zoom applied twice.** `fz_new_draw_device`
+   already carries the page-to-pixmap matrix, and `fz_run_page` was handed the
+   same matrix again. Every rasterised page was magnified about 2.4x and clipped
+   at the right and bottom edge, so OCR and the model saw roughly the left 40 %
+   of each receipt. Passing `fz_identity` to `fz_run_page` fixed it. This was
+   caught by rendering the same page with `pdftoppm` and comparing.
+2. **Narrow pages were rendered and then downscaled into illegibility.** A
+   receipt is 82 mm wide, so at 200 dpi it is 440 px across, and the long-edge
+   limit then kept it there. `ReadOptions::minShortEdge` now raises the render
+   resolution until the short edge reaches 1000 px, and the downscale refuses to
+   go below it. The same floor protects the EXIF-rotated photos.
+
+Measured on the real documents:
+
+| Route | Files | Result |
+|-------|-------|--------|
+| PDF with text layer | 4 | 1139–1726 characters, 0–3 ms, nothing rasterised |
+| PDF without text layer | 6 | 1–2 pages rasterised, 31–65 ms |
+| JPEG photo | 2 | 1 page image, 4–5 ms |
+
+**Tesseract lost, and that is now the default.** On every photographed receipt
+it produced confident nonsense: 4 characters from one, a page of noise from
+another, and 7.5 s spent magnifying a 174 px thumbnail into more noise. The
+vision model read the same 174 px image correctly, including the total. Since
+wrong text is worse than no text — it reaches the model looking like evidence —
+OCR is off by default and `--ocr` turns it on for the clean flatbed scans where
+it does pay off. Raw page images remain the primary input for the model.
+
+One data fact to carry into phase 2: the `GuSp_*` files are **collections**, not
+single invoices — 21 pages for `Lebensmittel`, 3 for `Tanken`, 2 for most
+others. A four-page default cap silently truncates them, and one dropped file can
+contain several invoices. Phase 2 needs an answer for that before the widget
+takes a single drop.
 
 ---
 
@@ -345,10 +385,15 @@ Phase 2 is done when all of the following hold:
 
 ## Open decisions
 
-* Whether to send extracted text *and* images for scanned PDFs, or images only.
-  Sending both costs tokens but helps when OCR garbles a number the model can read
-  visually. Measure in phase 2, then fix the default.
-* Whether the Tesseract pre-pass is needed at all on photos, or whether the vision
-  model alone is better. Also a phase 2 measurement.
-* Page cap default of 4. Revisit if multi-page invoices show up in the test set.
+* **Resolved in phase 1: the Tesseract pre-pass is off by default.** It reads
+  clean scans, but on every photographed receipt in the test set it produced
+  confident garbage that would be fed to the model as evidence. `--ocr` opts in.
+  Revisit only with a real flatbed-scan set to measure against.
+* Whether to send extracted text *and* images when the text layer route did fire.
+  Sending both costs tokens but helps when a number is ambiguous. Measure in
+  phase 2, then fix the default.
+* **Multi-invoice documents.** A single PDF can hold 21 receipts. Phase 2 must
+  decide between per-page extraction, a page cap that reports truncation, or
+  several records per file. Currently the cap truncates silently.
+* Page cap default of 4. Revisit once the collection files above are handled.
 * Model default `qwen2.5vl:7b`. Revisit once real invoices have been through it.

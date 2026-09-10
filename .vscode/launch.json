@@ -1,0 +1,87 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug: invoicedrop",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/src/invoicedrop",
+            "args": [
+                "--extract-only",
+                "${input:invoiceFile}"
+            ],
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty printing for Qt types",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "CMake: build (Debug)"
+        },
+        {
+            "name": "Debug: invoicedrop (dump page images)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/src/invoicedrop",
+            "args": [
+                "--extract-only",
+                "--dump-images",
+                "${input:dumpDir}",
+                "${input:invoiceFile}"
+            ],
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty printing for Qt types",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "CMake: build (Debug)"
+        },
+        {
+            "name": "Debug: tst_documentreader",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tests/tst_documentreader",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty printing for Qt types",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "CMake: build (Debug)"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "invoiceFile",
+            "type": "promptString",
+            "description": "Invoice to read (PDF, JPEG, PNG)",
+            "default": "${env:HOME}/Rechnungen/rechnung.pdf"
+        },
+        {
+            "id": "dumpDir",
+            "type": "promptString",
+            "description": "Directory for the dumped page images",
+            "default": "/tmp/invoicedrop-pages"
+        }
+    ]
+}

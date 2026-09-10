@@ -12,9 +12,14 @@ namespace InvoiceDrop::Extract::ImageOps {
 /// byte rows.
 PIX *fromRgbSamples(const unsigned char *samples, int width, int height, int stride);
 
-/// Returns a PIX whose long edge is at most `longEdge`. Returns a clone when the
-/// image is already small enough, so the caller always owns the result.
-PIX *downscale(PIX *source, int longEdge);
+/// Returns a PIX whose long edge is at most `longEdge`, but never shrinks the
+/// short edge below `minShortEdge`. That floor matters for narrow documents: a
+/// receipt 1000x3640 px would otherwise be scaled to 440 px wide purely because
+/// its long edge is large, and the text becomes unreadable.
+///
+/// Returns a clone when nothing needs to change, so the caller always owns the
+/// result.
+PIX *downscale(PIX *source, int longEdge, int minShortEdge);
 
 /// Converts any depth to 32 bit RGB and returns a new PIX.
 PIX *toRgb32(PIX *source);

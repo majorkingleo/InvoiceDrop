@@ -1,5 +1,8 @@
 #include "extract/imageops.h"
 
+#include <algorithm>
+#include <cmath>
+
 #include <QtGlobal>
 
 namespace InvoiceDrop::Extract::ImageOps {
@@ -43,21 +46,35 @@ PIX *fromRgbSamples(const unsigned char *samples, int width, int height, int str
     return pix;
 }
 
-PIX *downscale(PIX *source, int longEdge)
+PIX *downscale(PIX *source, int longEdge, int minShortEdge)
 {
     if (!source)
         return nullptr;
 
     const int width = pixGetWidth(source);
     const int height = pixGetHeight(source);
-    const int longest = qMax(width, height);
+    if (width <= 0 || height <= 0)
+        return nullptr;
 
-    if (longEdge <= 0 || longest <= longEdge)
+    const int longest = qMax(width, height);
+    const int shortest = qMin(width, height);
+
+    double scale = 1.0;
+    if (longEdge > 0 && longest > longEdge)
+        scale = static_cast<double>(longEdge) / longest;
+
+    // Only ever relax the shrink, never magnify: the floor exists to protect
+    // legibility, not to invent pixels.
+    if (minShortEdge > 0 && scale < 1.0 && shortest * scale < minShortEdge) {
+        const double floorScale = static_cast<double>(minShortEdge) / shortest;
+        scale = std::min(floorScale, 1.0);
+    }
+
+    if (scale >= 0.999 || scale <= 0.0)
         return pixClone(source);
 
-    const double factor = static_cast<double>(longEdge) / longest;
-    const int targetWidth = qMax(1, static_cast<int>(width * factor + 0.5));
-    const int targetHeight = qMax(1, static_cast<int>(height * factor + 0.5));
+    const int targetWidth = qMax(1, static_cast<int>(width * scale + 0.5));
+    const int targetHeight = qMax(1, static_cast<int>(height * scale + 0.5));
 
     PIX *scaled = pixScaleToSize(source, targetWidth, targetHeight);
     return scaled ? scaled : pixClone(source);

@@ -1,0 +1,11 @@
+{
+    "recommendations": [
+        // CMake integration: configure, build targets, launch targets.
+        "ms-vscode.cmake-tools",
+        // IntelliSense and the cppdbg debugger used by launch.json.
+        "ms-vscode.cpptools",
+        // Alternative to cpptools for editing: use one or the other, not both.
+        // "llvm-vs-code-extensions.vscode-clangd"
+        "vadimcn.vscode-lldb"
+    ]
+}

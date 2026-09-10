@@ -191,7 +191,7 @@ PIX *load(const QString &path, const ReadOptions &options, QStringList *notes, Q
         return nullptr;
     }
 
-    PIX *scaled = ImageOps::downscale(rgb, options.longEdge);
+    PIX *scaled = ImageOps::downscale(rgb, options.longEdge, options.minShortEdge);
     pixDestroy(&rgb);
     if (!scaled) {
         *error = QStringLiteral("image cannot be downscaled");

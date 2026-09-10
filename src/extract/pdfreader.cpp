@@ -5,6 +5,7 @@
 #include "extract/threadctx.h"
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 
 #include <QFile>
@@ -129,12 +130,58 @@ QString extractPageText(fz_context *ctx, fz_document *document, int index)
         .trimmed();
 }
 
+/// Picks a zoom factor for one page.
+///
+/// The requested dpi is the baseline, but a narrow page needs more: a thermal
+/// receipt 55 mm wide at 200 dpi is 440 px across, which is well below what OCR
+/// can read. The short edge is therefore raised to `minShortEdge`. In the other
+/// direction a huge sheet is capped by `maxPixels` so a single page cannot
+/// exhaust memory.
+float chooseZoom(const fz_rect &bounds, const ReadOptions &options, QStringList *notes)
+{
+    const double widthPoints = static_cast<double>(bounds.x1 - bounds.x0);
+    const double heightPoints = static_cast<double>(bounds.y1 - bounds.y0);
+    if (widthPoints <= 0.0 || heightPoints <= 0.0)
+        return static_cast<float>(options.dpi) / 72.0f;
+
+    double zoom = static_cast<double>(options.dpi) / 72.0;
+
+    const double shortEdgePoints = std::min(widthPoints, heightPoints);
+    if (options.minShortEdge > 0) {
+        const double wanted = options.minShortEdge / shortEdgePoints;
+        if (wanted > zoom) {
+            zoom = wanted;
+            const QString note = QStringLiteral("resolution raised to %1 dpi for a %2 mm narrow page")
+                                     .arg(zoom * 72.0, 0, 'f', 0)
+                                     .arg(shortEdgePoints * 25.4 / 72.0, 0, 'f', 0);
+            if (notes && !notes->contains(note))
+                notes->append(note);
+        }
+    }
+
+    if (options.maxPixels > 0) {
+        const double cap = std::sqrt(static_cast<double>(options.maxPixels)
+                                     / (widthPoints * heightPoints));
+        if (zoom > cap) {
+            zoom = cap;
+            const QString note =
+                QStringLiteral("resolution limited to %1 dpi by the pixel budget")
+                    .arg(zoom * 72.0, 0, 'f', 0);
+            if (notes && !notes->contains(note))
+                notes->append(note);
+        }
+    }
+
+    return static_cast<float>(zoom);
+}
+
 /// Renders one page to a 32 bit Leptonica PIX at the requested resolution.
 /// Returns nullptr and sets `error` on failure.
 PIX *renderPage(fz_context *ctx,
                 fz_document *document,
                 int index,
                 const ReadOptions &options,
+                QStringList *notes,
                 QString *error)
 {
     PageGuard page(ctx);
@@ -145,7 +192,7 @@ PIX *renderPage(fz_context *ctx,
     }
 
     const fz_rect bounds = fz_bound_page(ctx, page.handle);
-    const float zoom = static_cast<float>(options.dpi) / 72.0f;
+    const float zoom = chooseZoom(bounds, options, notes);
     const fz_matrix transform = fz_scale(zoom, zoom);
     const fz_irect bbox = fz_round_rect(fz_transform_rect(bounds, transform));
 
@@ -164,7 +211,10 @@ PIX *renderPage(fz_context *ctx,
         *error = QStringLiteral("page %1 draw device cannot be created").arg(index + 1);
         return nullptr;
     }
-    fz_run_page(ctx, page.handle, device.handle, transform, nullptr);
+    // The draw device already carries the page-to-pixmap transform, so the page
+    // itself must be run through the identity. Passing `transform` here as well
+    // applies the zoom twice and clips the right and bottom of the page.
+    fz_run_page(ctx, page.handle, device.handle, fz_identity, nullptr);
     fz_close_device(ctx, device.handle);
 
     PIX *pix = ImageOps::fromRgbSamples(fz_pixmap_samples(ctx, pixmap.handle),
@@ -187,7 +237,7 @@ bool finishPage(PIX *pagePix, int index, const ReadOptions &options, PageImage *
         return false;
     }
 
-    PIX *scaled = ImageOps::downscale(rgb, options.longEdge);
+    PIX *scaled = ImageOps::downscale(rgb, options.longEdge, options.minShortEdge);
     pixDestroy(&rgb);
     if (!scaled) {
         notes->append(QStringLiteral("page %1: downscale failed").arg(index + 1));
@@ -210,9 +260,9 @@ bool finishPage(PIX *pagePix, int index, const ReadOptions &options, PageImage *
         }
     }
 
-    if (options.want != Want::Images && Ocr::available()) {
+    if (options.want != Want::Images && Ocr::available(options.ocr)) {
         QString ocrError;
-        const QString recognized = Ocr::imageToText(scaled, options.languages, &ocrError);
+        const QString recognized = Ocr::imageToText(scaled, options.ocr, notes, &ocrError);
         if (!recognized.isEmpty()) {
             *text = recognized;
             usable = true;
@@ -287,7 +337,7 @@ bool read(const QString &path, const ReadOptions &options, Document *document)
 
         for (int i = 0; i < pagesToRead; ++i) {
             QString renderError;
-            PIX *pagePix = renderPage(ctx, doc.handle, i, options, &renderError);
+            PIX *pagePix = renderPage(ctx, doc.handle, i, options, &document->notes, &renderError);
             if (!pagePix) {
                 document->notes.append(renderError);
                 continue;
@@ -312,7 +362,7 @@ bool read(const QString &path, const ReadOptions &options, Document *document)
         document->text = pageTexts.join(QStringLiteral("\n\n")).trimmed();
         if (!document->text.isEmpty())
             document->notes.append(
-                QStringLiteral("text recovered by OCR (%1)").arg(options.languages));
+                QStringLiteral("text recovered by OCR (%1)").arg(options.ocr.languages));
         if (!document->pages.isEmpty())
             document->notes.append(QStringLiteral("%1 page(s) rasterised at %2 dpi, long edge %3")
                                        .arg(document->pages.size())

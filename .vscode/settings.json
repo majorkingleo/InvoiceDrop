@@ -1,0 +1,40 @@
+{
+    // Tasks run in fish, because that is the login shell. Using the automation
+    // profile rather than the interactive one keeps task output clean.
+    "terminal.integrated.automationProfile.linux": {
+        "path": "fish",
+        "args": [
+            "-c"
+        ]
+    },
+    "cmake.generator": "Ninja",
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "cmake.configureArgs": [
+        "-DCMAKE_BUILD_TYPE=Debug"
+    ],
+    "cmake.configureOnOpen": false,
+    "cmake.exportCompileCommandsFile": true,
+    "C_Cpp.default.cppStandard": "c++20",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/src"
+    ],
+    "files.associations": {
+        "*.h": "cpp",
+        "*.kcfg": "xml"
+    },
+    "editor.rulers": [
+        100
+    ],
+    "search.exclude": {
+        "**/build": true,
+        "**/build-*": true
+    },
+    "files.watcherExclude": {
+        "**/build/**": true,
+        "**/build-*/**": true
+    },
+    "chat.tools.terminal.autoApprove": {
+        "ctest": true
+    }
+}

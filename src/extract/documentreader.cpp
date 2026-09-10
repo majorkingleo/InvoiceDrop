@@ -46,15 +46,15 @@ void readImage(const QString &path, const ReadOptions &options, Document *docume
         }
     }
 
-    if (options.want != Want::Images && Ocr::available()) {
+    if (options.want != Want::Images && Ocr::available(options.ocr)) {
         QString ocrError;
-        const QString text = Ocr::imageToText(pix, options.languages, &ocrError);
+        const QString text = Ocr::imageToText(pix, options.ocr, &document->notes, &ocrError);
         if (!text.isEmpty()) {
             document->text = text;
             document->notes.append(
-                QStringLiteral("text recovered by OCR (%1)").arg(options.languages));
+                QStringLiteral("text recovered by OCR (%1)").arg(options.ocr.languages));
         } else if (!ocrError.isEmpty()) {
-            document->notes.append(QStringLiteral("OCR: %1").arg(ocrError));
+            document->notes.append(ocrError);
         } else {
             document->notes.append(QStringLiteral("OCR found no text"));
         }
