@@ -1,0 +1,18 @@
+{
+    "bills": [
+        {
+            "bill": 1,
+            "vendor": "Elisabeth-Apotheke",
+            "date": "2025-07-21",
+            "gross_total": 26.55,
+            "currency": "EUR"
+        },
+        {
+            "bill": 2,
+            "vendor": "SONNEN apotheke",
+            "date": "2025-07-14",
+            "gross_total": 10.90,
+            "currency": "EUR"
+        }
+    ]
+}

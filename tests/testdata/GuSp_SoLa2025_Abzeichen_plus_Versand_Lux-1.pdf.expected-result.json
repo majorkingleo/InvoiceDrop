@@ -1,0 +1,18 @@
+{
+    "bills": [
+        {
+            "bill": 1,
+            "vendor": "Bernhard",
+            "date": "2025-08-25",
+            "gross_total": 134.60,
+            "currency": "EUR"
+        },
+        {
+            "bill": 2,
+            "vendor": "Österreichische Post AG",
+            "date": "2025-10-24",
+            "gross_total": 6.50,
+            "currency": "EUR"
+        }
+    ]
+}

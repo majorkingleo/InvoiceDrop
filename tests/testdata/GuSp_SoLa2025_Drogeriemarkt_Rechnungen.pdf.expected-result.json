@@ -1,0 +1,18 @@
+{
+    "bills": [
+        {
+            "bill": 1,
+            "vendor": "dm drogeriemarkt GmbH",
+            "date": "2025-07-16",
+            "gross_total": 0.85,
+            "currency": "EUR"
+        },
+        {
+            "bill": 2,
+            "vendor": "dm drogeriemarkt GmbH",
+            "date": "2025-07-20",
+            "gross_total": 16.45,
+            "currency": "EUR"
+        }
+    ]
+}

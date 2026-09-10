@@ -1,0 +1,11 @@
+{
+    "bills": [
+        {
+            "bill": 1,
+            "vendor": "ÖBB",
+            "date": "2025-04-30",
+            "gross_total": 80.64,
+            "currency": "EUR"
+        }
+    ]
+}
