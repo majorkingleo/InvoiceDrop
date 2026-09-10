@@ -25,7 +25,7 @@ file watcher. Non-goals until phase 5: no QML at all.
 | 2 | **MVP**: shop, date, sum from a real invoice | `InvoiceDrop bill1.pdf` | **done** |
 | 3 | SQLite store, hash cache, history | `invoicedrop history` | **done** |
 | 4 | Daemon: inbox watch, DBus, notifications | `invoicedrop daemon` | **done** |
-| 5 | Plasma widget | drag and drop in the panel | to do |
+| 5 | Plasma widget | drag and drop in the panel | **done** |
 | 6 | Packaging, PKGBUILD, doctor | `pacman -U` | to do |
 
 Phase 2 is the first point where the tool is useful. Everything after that is
@@ -395,6 +395,44 @@ Steps:
 Verify: drag a JPEG onto the widget, a card appears with shop, date and sum, and
 dragging the same file again is instant because of the cache.
 
+### What phase 5 actually found
+
+The widget is four QML files and no C++. `main.qml` is a drop target and a list,
+`InvoiceCard.qml` is one row, `config.qml` mirrors the config keys, and
+`invoicelogic.js` holds everything with a decision in it, so it can be tested on
+its own. `tests/tst_plasmoid.qml` runs it under `qmlscene6` as a CTest entry.
+
+1. **Recovering the path by parsing the command back is wrong.** The data engine
+   reports the source string it was handed and nothing else, so the first attempt
+   read the path back out of the command line. A path containing an apostrophe is
+   escaped as `'\''`, and the regex then matched the last quoted fragment: an
+   invoice in `/tmp/it's.pdf` was reported as `s.pdf`. The path is remembered in a
+   map instead, keyed on the command.
+2. **An absent JSON key is `undefined`, not empty.** Binding
+   `bill.quality_warning` straight to a text property produced `Unable to assign
+   [undefined] to QString` on every card. Only some bills carry that key, so the
+   optional fields are folded into one string with a default first.
+3. **The engine's data keys were verified, not assumed.** A probe printed
+   `["exit code", "exit status", "stderr", "stdout"]`. Guessing `status` or
+   `output` would have produced a widget that silently showed nothing.
+4. **`Qt.exit()` is ignored by `qmlscene6`,** and the newer `qml` runner rejects
+   relative JavaScript imports that `qmlscene6` accepts. The test therefore quits
+   with `Qt.quit()` and CTest decides from the output with
+   `PASS_REGULAR_EXPRESSION` and `FAIL_REGULAR_EXPRESSION`.
+5. **The first CLI call now starts the daemon through D-Bus activation.** Without
+   it the widget would pay a model load on every drop, which is exactly the cost
+   the daemon exists to remove. With it, the first drop pays it once and the rest
+   are milliseconds.
+
+The one thing not automated is the drag itself. The command a drop builds, the
+reply it parses and the labels it renders are all checked; the gesture is not.
+Verified by hand instead with `plasmawindowed com.github.invoicedrop`, which
+loads the package with no QML warnings.
+
+The widget needs `invoicedrop` on the PATH that Plasma sees; `cmake --install`
+puts it in `/usr/local/bin`. `~/.local/bin/invoicedrop` is a symlink to the build
+tree for development.
+
 ---
 
 ## Phase 6 — Packaging
@@ -443,10 +481,17 @@ from the build tree.
   markdown fence stripping, garbage input returning empty fields.
 * `tst_documentreader` — every file in `tests/testdata/` through `read()`,
   asserting each one yields text or page images and that no step reports an error.
-* Manual acceptance for phase 2: a fixed set of real invoices, checked by eye
-  once, then kept as a regression list.
-* No test ever needs the network. The Ollama client gets an injectable base URL so
-  a stub can be pointed at it.
+* `tst_store` — the cache key, saving and finding bills, replacing a document,
+  forgetting one, and surviving a reopen.
+* `tst_daemon` — the inbox watcher's settle delay and its handled list, and the
+  notification text. No bus and no model needed.
+* `tst_plasmoid.qml` — the widget's command builder and reply parser, run under
+  `qmlscene6`.
+* `tst_bills` — an integration suite. It needs Ollama and skips itself without
+  one, and it is the only suite that can be red for a model's reasons rather than
+  the code's.
+
+Everything except `tst_bills` runs offline in about five seconds.
 
 ## CLI contract
 

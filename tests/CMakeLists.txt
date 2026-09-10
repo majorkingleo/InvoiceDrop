@@ -62,6 +62,26 @@ target_link_libraries(tst_daemon
 
 add_test(NAME daemon COMMAND tst_daemon)
 
+# The plasmoid's decision logic lives in a JavaScript module so it can be run on
+# its own. The drag itself cannot be automated; the command a drop builds and the
+# reply it parses can be, and that is where the mistakes were.
+find_program(QMLSCENE6_EXECUTABLE NAMES qmlscene6)
+
+if(QMLSCENE6_EXECUTABLE)
+    add_test(NAME plasmoid
+             COMMAND ${QMLSCENE6_EXECUTABLE} -platform offscreen
+                     ${CMAKE_CURRENT_SOURCE_DIR}/tst_plasmoid.qml)
+
+    # qmlscene ignores Qt.exit(), so the verdict comes from the output.
+    set_tests_properties(plasmoid PROPERTIES
+        PASS_REGULAR_EXPRESSION "ALL PASSED"
+        FAIL_REGULAR_EXPRESSION "CHECK\\(S\\) FAILED"
+        TIMEOUT 120
+    )
+else()
+    message(STATUS "qmlscene6 not found, skipping the plasmoid logic checks")
+endif()
+
 # Run from the project root so tests/testdata is reachable by relative path as
 # well as through QFINDTESTDATA.
 set_tests_properties(documentreader PROPERTIES

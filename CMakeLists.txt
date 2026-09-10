@@ -49,6 +49,13 @@ message(STATUS "Tesseract  ${TESSERACT_VERSION}")
 
 add_subdirectory(src)
 
+# The plasmoid is pure QML and needs no build step. Installing the package tree
+# is enough for plasmashell to find it; kpackagetool6 is only for a per user
+# install during development.
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/plasmoid/com.github.invoicedrop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/plasma/plasmoids
+        PATTERN "*.expected-result.json" EXCLUDE)
+
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()

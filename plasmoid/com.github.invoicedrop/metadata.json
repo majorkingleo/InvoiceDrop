@@ -1,0 +1,21 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Martin"
+            }
+        ],
+        "Category": "Utilities",
+        "Description": "Drop invoices and receipts here and read them with a local AI model.",
+        "Description[de]": "Rechnungen und Belege hier ablegen und mit einer lokalen KI auslesen.",
+        "Icon": "invoice",
+        "Id": "com.github.invoicedrop",
+        "License": "GPL-3.0-or-later",
+        "Name": "InvoiceDrop",
+        "Name[de]": "InvoiceDrop",
+        "Version": "0.1.0",
+        "Website": "https://github.com/example/invoicedrop"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

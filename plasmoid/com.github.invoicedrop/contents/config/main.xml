@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+                          http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+    <kcfgfile name=""/>
+    <group name="General">
+        <entry name="cliPath" type="String">
+            <label>Path to the invoicedrop binary</label>
+            <default>invoicedrop</default>
+        </entry>
+        <entry name="model" type="String">
+            <label>Ollama model to use</label>
+            <default>gemma4:latest</default>
+        </entry>
+        <entry name="historyLimit" type="Int">
+            <label>Number of bills kept in the list</label>
+            <default>8</default>
+            <min>1</min>
+            <max>50</max>
+        </entry>
+        <entry name="archiveAfterReading" type="Bool">
+            <label>Move a document into the archive once it was read</label>
+            <default>false</default>
+        </entry>
+    </group>
+</kcfg>

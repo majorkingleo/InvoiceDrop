@@ -39,6 +39,42 @@ inside the single C++ process.
   That keeps the daemon a `QCoreApplication` with no QtGui and therefore no
   display dependency.
 
+## The widget
+
+QML only, no C++ plugin and no build step. `main.qml` is a `DropArea` and a
+`ListView`, `InvoiceCard.qml` is one row, and `config.qml` mirrors the KConfigXT
+keys in `contents/config/main.xml`.
+
+A drop builds one command and hands it to the `executable` data engine:
+
+```
+'invoicedrop' --json --model 'gemma4:latest' '/path/to/beleg.pdf'
+```
+
+That is the same interface the shell uses, so the widget cannot drift from the
+CLI, and because the CLI hands the work to a running daemon by itself, a warm
+daemon makes a drop a few milliseconds. The first call of a session activates the
+daemon through D-Bus and pays the model load once.
+
+`invoicelogic.js` holds everything with a decision in it — building the command,
+parsing the newline separated JSON, remembering which path a command belongs to —
+so it can be run under `qmlscene6` by `tests/tst_plasmoid.qml`. The drag itself is
+not automatable; the command and the parsing are.
+
+Two details that cost time:
+
+* **An absent JSON key is `undefined`, not empty.** `quality_warning` is only
+  present when there is a warning, and binding it straight to a `text` property
+  warns and shows nothing sensible. Optional fields are folded into a string with
+  a default first.
+* **The path is remembered, not recovered.** The data engine reports the source
+  string it was handed and nothing alongside it. Reading the path back out of the
+  command fails on a path containing an apostrophe, which shell quoting escapes
+  as `'\''`.
+
+The engine hands over four keys: `stdout`, `stderr`, `exit code` and
+`exit status`.
+
 ## Repository layout
 
 ```
@@ -50,6 +86,7 @@ plasmoid/com.github.invoicedrop/          QML only, no C++ plugin
   contents/config/config.qml    settings UI
   contents/ui/main.qml          PlasmoidItem, DropArea, ListView
   contents/ui/InvoiceCard.qml   one result row
+  contents/ui/invoicelogic.js   command building and reply parsing, testable
 
 src/                            C++20 / Qt 6 / KF 6
   CMakeLists.txt

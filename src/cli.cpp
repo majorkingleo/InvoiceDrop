@@ -480,20 +480,33 @@ int runCli(const QStringList &arguments)
     if (delegatable) {
         const QDBusConnection bus = QDBusConnection::sessionBus();
         QDBusConnectionInterface *busInterface = bus.isConnected() ? bus.interface() : nullptr;
-        if (busInterface
-            && busInterface->isServiceRegistered(QString::fromLatin1(Daemon::kServiceName))) {
-            QDBusInterface control(QString::fromLatin1(Daemon::kServiceName),
-                                   QString::fromLatin1(Daemon::kObjectPath),
-                                   QStringLiteral("org.kde.invoicedrop.Control"), bus);
-            if (control.isValid()) {
-                const QDBusReply<QString> reply = control.call(QStringLiteral("Analyze"), files);
-                if (reply.isValid()) {
-                    const int failures = printDelegatedResult(reply.value(), asJson);
-                    return failures == 0 ? kExitOk : kExitFailure;
+        if (busInterface) {
+            const QString service = QString::fromLatin1(Daemon::kServiceName);
+            bool registered = busInterface->isServiceRegistered(service);
+
+            if (!registered) {
+                // Ask the bus to start the daemon. This is what makes the first
+                // drop pay off: it costs one model load, and every later call
+                // finds the weights already resident. Without a service file
+                // the bus refuses immediately and nothing changes.
+                const QDBusReply<void> started = busInterface->startService(service);
+                registered = started.isValid();
+            }
+
+            if (registered) {
+                QDBusInterface control(service, QString::fromLatin1(Daemon::kObjectPath),
+                                       QStringLiteral("org.kde.invoicedrop.Control"), bus);
+                if (control.isValid()) {
+                    const QDBusReply<QString> reply =
+                        control.call(QStringLiteral("Analyze"), files);
+                    if (reply.isValid()) {
+                        const int failures = printDelegatedResult(reply.value(), asJson);
+                        return failures == 0 ? kExitOk : kExitFailure;
+                    }
+                    err() << "the daemon did not answer (" << reply.error().message()
+                          << "), reading here instead" << Qt::endl;
+                    err().flush();
                 }
-                err() << "the daemon did not answer (" << reply.error().message()
-                      << "), reading here instead" << Qt::endl;
-                err().flush();
             }
         }
     }

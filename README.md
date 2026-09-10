@@ -251,6 +251,35 @@ invoicedrop --model gemma4:latest --json rechnung.pdf | jq '.gross_total'
 invoicedrop --model minicpm-v:8b     --json rechnung.pdf | jq '.gross_total'
 ```
 
+## The Plasma widget
+
+A panel widget that takes the same drop. Drag an invoice onto it and a card
+appears with the shop, the date and the sum; a document with several pages
+produces several cards, because a bill is a page.
+
+The widget owns no logic. It builds the same command the shell would and reads
+the same JSON, so a drop cannot behave differently from a terminal run.
+
+```fish
+kpackagetool6 --type Plasma/Applet --install plasmoid/com.github.invoicedrop
+plasmawindowed com.github.invoicedrop     # try it in a window first
+```
+
+Then add it: right click the panel, **Add Widgets**, search for `InvoiceDrop`.
+For a system-wide install, `cmake --install` places the package under
+`share/plasma/plasmoids`.
+
+The widget calls `invoicedrop`, so that binary has to be on the PATH Plasma sees.
+`cmake --install` puts it in `/usr/local/bin`. To check:
+
+```fish
+plasmawindowed com.github.invoicedrop    # watch for errors in the terminal
+```
+
+Settings are available in the widget's own configuration dialog: the binary path,
+the model, how many bills to keep in the list, and whether a document should be
+moved into the archive once it was read.
+
 ## The daemon
 
 Reading a document in a fresh process pays the model load every time, which
@@ -277,6 +306,10 @@ $ invoicedrop --local rechnung.pdf  # 3.7 s, read here
 The output and the exit code are identical either way; only the work moves.
 `--local`, `--no-cache` and `--dump-images` always read here, since the daemon
 cannot honour them.
+
+The first call of a session starts the daemon through D-Bus activation, so it
+never has to be enabled by hand for the tool to be quick. This is also what makes
+the widget's first drop the only slow one.
 
 ### Starting it automatically
 
@@ -418,14 +451,21 @@ a run is much faster than the first because the weights stay resident.
 ## Project layout
 
 ```
+plasmoid/               the Plasma widget, QML only
+data/                   the systemd unit and the D-Bus service file templates
 src/                    the binary
-  cli.cpp               options, output, exit codes
+  cli.cpp               options, output, exit codes, delegation to the daemon
+  daemon.{h,cpp}        inbox watching, the DBus interface, notifications
+  inboxwatcher.{h,cpp}  settle delay and the handled list
+  notifier.{h,cpp}      freedesktop notifications over DBus
+  analysis.{h,cpp}      the pipeline: read, cache, infer, one record per bill
   invoice.{h,cpp}       the invoice model and all format normalisation
   invoice-schema.h      the JSON schema sent to the model
   ollama.{h,cpp}        the HTTP client
+  store.{h,cpp}         SQLite: documents, bills, the settings fingerprint
   extract/              document reading: MuPDF, Leptonica, Tesseract
-tests/                  two QTest suites, run with ctest
-  testdata/             real invoices and receipts used as regression input
+tests/                  five suites, run with ctest
+  testdata/             real invoices plus their expected results
 docs/architecture.md    how it works and why
 docs/plan.md            what each phase delivered
 ```
