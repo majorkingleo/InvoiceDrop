@@ -1,0 +1,151 @@
+{
+    "bills": [
+        {
+            "bill": 1,
+            "vendor": "HOFER KG",
+            "date": "2025-07-16",
+            "gross_total": 36.01,
+            "currency": "EUR"
+        },
+        {
+            "bill": 2,
+            "vendor": "EUROSPAR",
+            "date": "2025-07-16",
+            "gross_total": 77.91,
+            "currency": "EUR"
+        },
+        {
+            "bill": 3,
+            "vendor": "HOFER KG",
+            "date": "2025-07-16",
+            "gross_total": 177.16,
+            "currency": "EUR"
+        },
+        {
+            "bill": 4,
+            "vendor": "EUROSPAR",
+            "date": "2025-07-17",
+            "gross_total": 39.11,
+            "currency": "EUR"
+        },
+        {
+            "bill": 5,
+            "vendor": "HOFER KG",
+            "date": "2025-07-17",
+            "gross_total": 45.25,
+            "currency": "EUR"
+        },
+        {
+            "bill": 6,
+            "vendor": "EUROSPAR",
+            "date": "2025-07-18",
+            "gross_total": 46.16,
+            "currency": "EUR"
+        },
+        {
+            "bill": 7,
+            "vendor": "HOFER KG",
+            "date": "2025-07-19",
+            "gross_total": 85.20,
+            "currency": "EUR"
+        },        
+        {
+            "bill": 8,
+            "vendor": "EUROSPAR",
+            "date": "2025-07-19",
+            "gross_total": 12.40,
+            "currency": "EUR"
+        },
+        {
+            "bill": 9,
+            "vendor": "HOFER KG",
+            "date": "2025-07-20",
+            "gross_total": 146.04,
+            "currency": "EUR"
+        },         
+        {
+            "bill": 10,
+            "vendor": "EUROSPAR",
+            "date": "2025-07-20",
+            "gross_total": 14.53,
+            "currency": "EUR"
+        },        
+        {
+            "bill": 11,
+            "vendor": "HOFER KG",
+            "date": "2025-07-21",
+            "gross_total": 62.62,
+            "currency": "EUR"
+        },          
+        {
+            "bill": 10,
+            "vendor": "EUROSPAR",
+            "date": "2025-07-21",
+            "gross_total": 12.54,
+            "currency": "EUR"
+        },          
+        {
+            "bill": 12,
+            "vendor": "HOFER KG",
+            "date": "2025-07-22",
+            "gross_total": 147.75,
+            "currency": "EUR"
+        },          
+        {
+            "bill": 13,
+            "vendor": "EUROSPAR",
+            "date": "2025-07-22",
+            "gross_total": 25.90,
+            "currency": "EUR"
+        },            
+        {
+            "bill": 14,
+            "vendor": "HOFER KG",
+            "date": "2025-07-24",
+            "gross_total": 89.86,
+            "currency": "EUR"
+        },          
+        {
+            "bill": 15,
+            "vendor": "SPAR",
+            "date": "2025-07-24",
+            "gross_total": 48.85,
+            "currency": "EUR"
+        },         
+        {
+            "bill": 16,
+            "vendor": "HOFER KG",
+            "date": "2025-07-25",
+            "gross_total": 40.60,
+            "currency": "EUR"
+        },         
+        {
+            "bill": 17,
+            "vendor": "EUROSPAR",
+            "date": "2025-07-25",
+            "gross_total": 6.98,
+            "currency": "EUR"
+        },              
+        {
+            "bill": 18,
+            "vendor": "EUROSPAR",
+            "date": "2025-07-26",
+            "gross_total": 16.92,
+            "currency": "EUR"
+        },    
+        {
+            "bill": 19,
+            "vendor": "Bäckerei Wienerroither GmbH",
+            "date": "2025-07-26",
+            "gross_total": 10.20,
+            "currency": "EUR"
+        },                       
+        {
+            "bill": 20,
+            "vendor": "MARTIN AUER",
+            "date": "2025-08-01",
+            "gross_total": 55.30,
+            "currency": "EUR"
+        }
+    ]
+}

@@ -1,0 +1,18 @@
+{
+    "bills": [
+        {
+            "bill": 1,
+            "vendor": "Gastronomie Juchart",
+            "date": "2025-07-18",
+            "gross_total": 22.40,
+            "currency": "EUR"
+        },
+        {
+            "bill": 2,
+            "vendor": "Strandbad Egg",
+            "date": "2025-07-23",
+            "gross_total": 41.60,
+            "currency": "EUR"
+        }
+    ]
+}
