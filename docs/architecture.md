@@ -54,19 +54,19 @@ plasmoid/com.github.invoicedrop/          QML only, no C++ plugin
 src/                            C++20 / Qt 6 / KF 6
   CMakeLists.txt
   main.cpp                      QCoreApplication, dispatch daemon mode vs CLI mode
-  application.{h,cpp}           service object, job queue, lifetime
-  cli.{h,cpp}                   QCommandLineParser, thin DBus client
-  settings.{h,cpp}              KConfigXT generated config
-  dbus-adaptor.{h,cpp}          org.kde.invoicedrop at /InvoiceDrop
-  org.kde.invoicedrop.xml       DBus interface description
-  inboxwatcher.{h,cpp}          QFileSystemWatcher + settle-on-write delay
-  notifier.{h,cpp}              KNotification
+  cli.{h,cpp}                   QCommandLineParser, output, delegation to the daemon
+  daemon.{h,cpp}                the service and its DBus adaptor
+  inboxwatcher.{h,cpp}          QFileSystemWatcher, settle-on-write, handled list
+  notifier.{h,cpp}              freedesktop notifications over DBus
+  paths.{h,cpp}                 ~/.local/share/invoicedrop and friends
+  analysis.{h,cpp}              the pipeline: one bill per page, cache aware
+  json.{h,cpp}                  the JSON shape the CLI and the daemon share
+  hash.{h,cpp}                  SHA-256 of a file, chunked
   ollama.{h,cpp}                QNetworkAccessManager, /api/chat, schema format
   invoice.{h,cpp}               fromJson/toJson, number and date normalisation
   invoice-schema.h              JSON schema sent to the model
-  store.{h,cpp}                 QtSql QSQLITE, dedupe by SHA-256
+  store.{h,cpp}                 QtSql QSQLITE, bills keyed on (sha256, page)
   version.h.in
-  jobs/analyzejob.{h,cpp}       QRunnable: extract on the pool, then infer
   extract/documentreader.{h,cpp}  document model, routing on file suffix
   extract/pdfreader.{h,cpp}     MuPDF: fz_context, text layer, page raster
   extract/imagereader.{h,cpp}   Leptonica pixRead, orientation, downscale
@@ -170,14 +170,14 @@ scripting and for the plasmoid.
 | `--move` | move the original into the archive once every bill was read |
 | `--db PATH` | database file, defaults to `~/.local/share/invoicedrop/invoicedrop.db` |
 | `--limit N` | how many bills `history` lists |
-| `--move` | archive the original after success |
+| `--local` | read here instead of asking a running daemon |
 | `--verbose` | extraction notes and timings on stderr |
 
 `-v` is not free: `QCommandLineParser` claims it for `--version`, so the verbose
 flag is long form only.
 
-Subcommands: `history` lists what is stored. `daemon` and `doctor` follow in
-phases 4 and 6. The implementation order is in `docs/plan.md`.
+Subcommands: `history` lists what is stored, `daemon` watches the inbox. `doctor`
+follows in phase 6. The implementation order is in `docs/plan.md`.
 
 ## Store
 
@@ -221,8 +221,9 @@ bills is treated as a miss and read again, rather than reported as nothing.
    scans and photos.
 7. The reply is validated against the invoice JSON schema, normalised
    (decimal separator, ISO dates, currency) and written to SQLite.
-8. The daemon emits a KNotification and keeps the last N records in memory; the
-   CLI prints the JSON, the applet renders vendor, date, total and currency.
+8. The daemon sends a desktop notification over `org.freedesktop.Notifications`
+   and prints the same JSON the CLI prints; the applet renders vendor, date, total
+   and currency.
 
 ## Ollama integration
 
@@ -313,8 +314,9 @@ Any model that reports the `vision` capability in `/api/show` works. Check with
 `invoicedrop doctor` once that subcommand exists; until then,
 `curl -s localhost:11434/api/show -d '{"model":"NAME"}'` lists the capabilities.
 
-The model is a settings value in both `invoicedropd` (KConfig) and the plasmoid
-configuration dialog; they write the same key.
+The model is a settings value in both the daemon and the plasmoid configuration
+dialog; they read the same key. Until the settings file lands, it is a flag:
+`--model`.
 
 ## Concurrency and resources
 
@@ -346,22 +348,53 @@ configuration dialog; they write the same key.
 
 ## DBus interface
 
-Optional. The CLI is fully functional without a daemon — this interface exists so
-that the plasmoid, the inbox watcher and a concurrent CLI call share one job
-queue and one warm model. It arrives in phase 4 of `docs/plan.md`.
-
 The daemon owns the session bus name `org.kde.invoicedrop` and exports
-`/InvoiceDrop` with `org.kde.invoicedrop.Control`:
+`/InvoiceDrop` with `org.kde.invoicedrop.Control`. It is a `QDBusAbstractAdaptor`
+with an inline introspection string: no XML file, no `qt6_add_dbus_adaptor`, and
+no KDE Frameworks.
+
+The CLI is fully functional without a daemon. When one is running the CLI hands
+the paths over instead, because the daemon already has the model resident, and
+then reformats the reply into the shape the run asked for. `--local` reads the
+document here anyway.
 
 | Method | Signature | Purpose |
 |--------|-----------|---------|
-| `Analyze` | `as -> s` | analyse paths, returns a JSON array of records |
-| `History` | `u -> s` | last N records as JSON |
-| `Status` | `-> a{sv}` | busy flag, queue depth, active worker threads, model, ollama reachability |
-| `Reload` | `-> ` | re-read configuration |
+| `Analyze` | `as -> s` | analyse paths, returns one JSON object per bill per line |
+| `History` | `u -> s` | last N bills as newline separated JSON |
+| `Status` | `-> a{sv}` | busy flag, model, endpoint, inbox, stored count, last file, pending |
 
-The service is `SystemdService=invoicedrop.service` in its `.service.in`, so the
-first call from the CLI starts it without the user enabling anything manually.
+Two files let the bus start the daemon on demand, so nothing has to be enabled by
+hand after a login:
+
+* `data/invoicedrop.service` — the systemd user unit, installed into
+  `${CMAKE_INSTALL_LIBDIR}/systemd/user`.
+* `data/org.kde.invoicedrop.service` — the D-Bus service file, with
+  `SystemdService=invoicedrop.service`, installed into
+  `${CMAKE_INSTALL_DATADIR}/dbus-1/services`.
+
+## The daemon
+
+`invoicedrop daemon` watches the inbox folder, reads what lands in it and says
+so. `--once` drains the folder and exits.
+
+**Notifications go to `org.freedesktop.Notifications` directly.** Sending one is
+a single DBus call, and going straight to the interface avoids a KDE Frameworks
+dependency for a toast. A missing or failing notification service is ignored: a
+toast must never fail a run.
+
+**A dropped file is not readable when it appears.** A copy from a camera or a
+browser download is still being written, and reading it early yields a truncated
+PDF and a confusing error. `InboxWatcher` therefore waits until the size has been
+unchanged for two ticks before it reports the file, and remembers what it already
+reported, keyed on size and modification time, so a rescan cannot hand the same
+file over twice. Hidden names are skipped, because editors and download tools
+write to a dot file and rename it into place.
+
+**Reading a document blocks on a local event loop.** `OllamaClient` waits for the
+HTTP reply with `QEventLoop`, so watcher signals arrive in the middle of a job.
+The daemon refuses re-entrant work and queues it, and it prints the same JSON
+lines the CLI prints, so a daemon run and a CLI run can be compared directly.
 
 ## Build
 
@@ -373,20 +406,18 @@ cmake --build build
 sudo cmake --install build
 ```
 
-* `src/CMakeLists.txt` builds `invoicedropd`. `find_package` pulls Qt6 `Core
-  Network Sql DBus`, KF6 `CoreAddons Config ConfigWidgets I18n Notifications`,
-  plus `ECM`. C++20 is required.
-* MuPDF, Tesseract and Leptonica are located with `pkg_check_modules` and
-  `find_library`. ECM provides the KDE install layout, `KDE_INSTALL_LIBEXECDIR`
-  for the binary and the session bus interface directory.
-* The DBus interface XML is compiled into an adaptor with `qt6_add_dbus_adaptor`
-  and installed into the interface directory, which is what lets DBus activate
-  the service on the first CLI call. The KConfigXT class is generated from
-  `src/invoicedrop.kcfg`.
+* `src/CMakeLists.txt` builds `invoicedrop`. `find_package` pulls Qt6 `Core
+  Network Sql DBus`, plus `ECM` for the install layout and the systemd/bus
+  destination directories. C++20 is required. No KDE Frameworks are linked: the
+  notification interface and the DBus adaptor are both plain Qt.
+* MuPDF, Tesseract and Leptonica are located with `pkg_check_modules`.
+* The DBus adaptor carries its introspection inline, so there is no XML file to
+  compile and no code generator in the build. The D-Bus service file and the
+  systemd user unit are configured from `data/*.in` with the real install paths.
 * The systemd unit, the `.desktop` file and the icon are installed by the same
   CMake project. The plasmoid stays pure QML and is installed separately with
   `kpackagetool6`; it never needs rebuilding for a daemon change.
 
-Build-time only: `cmake`, `ninja`, `extra-cmake-modules`, `pkgconf`.
+Build-time only: `cmake`, `ninja`, `pkgconf`.
 Runtime: `mupdf`, `tesseract`, `tesseract-data-deu`, `tesseract-data-eng`,
-`leptonica`, Qt6 and KF6 libraries, and a running Ollama.
+`leptonica`, Qt6 libraries, and a running Ollama.

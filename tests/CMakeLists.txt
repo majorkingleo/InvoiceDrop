@@ -52,6 +52,16 @@ target_link_libraries(tst_store
 
 add_test(NAME store COMMAND tst_store)
 
+qt_add_executable(tst_daemon tst_daemon.cpp)
+
+target_link_libraries(tst_daemon
+    PRIVATE
+        invoicedrop-ai
+        Qt6::Test
+)
+
+add_test(NAME daemon COMMAND tst_daemon)
+
 # Run from the project root so tests/testdata is reachable by relative path as
 # well as through QFINDTESTDATA.
 set_tests_properties(documentreader PROPERTIES

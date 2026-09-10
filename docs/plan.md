@@ -24,7 +24,7 @@ file watcher. Non-goals until phase 5: no QML at all.
 | 1 | Extraction only, no AI | `invoicedrop --extract-only f.pdf` | **done** |
 | 2 | **MVP**: shop, date, sum from a real invoice | `InvoiceDrop bill1.pdf` | **done** |
 | 3 | SQLite store, hash cache, history | `invoicedrop history` | **done** |
-| 4 | Daemon: inbox watch, DBus, notifications | `invoicedrop daemon` | to do |
+| 4 | Daemon: inbox watch, DBus, notifications | `invoicedrop daemon` | **done** |
 | 5 | Plasma widget | drag and drop in the panel | to do |
 | 6 | Packaging, PKGBUILD, doctor | `pacman -U` | to do |
 
@@ -336,6 +336,40 @@ Steps:
 Verify: drop a file into `~/.local/share/invoicedrop/inbox/`, get a notification,
 confirm with `systemctl --user status invoicedrop.service` — then confirm the CLI
 result did not change.
+
+### What phase 4 actually found
+
+**No KDE Frameworks were added.** The plan called for `KNotification`,
+`KDBusAddons` and a generated adaptor. None of that was needed: sending a
+notification is one call to `org.freedesktop.Notifications`, which Plasma, GNOME
+and every other desktop implements, and the adaptor is a `QDBusAbstractAdaptor`
+with an inline introspection string. The build stays on Qt alone, and no package
+was added to the machine. The systemd unit and the D-Bus service file are still
+installed, so activation works the same.
+
+1. **The blocking HTTP wait pumps the event loop.** `OllamaClient` waits for the
+   reply with a local `QEventLoop`, and while it runs the inbox timer keeps
+   firing. The watcher settled the same file during the first read and handed it
+   over a second time, so one dropped document was analysed twice. Two fixes:
+   the watcher now keeps a list of what it already reported, keyed on size and
+   modification time, and the daemon refuses re-entrant work and queues it
+   instead.
+2. **A folder scan has no memory.** The first fix was not enough on its own,
+   because `scan()` re-queued every file it saw on every tick. Without the
+   handled list a rescan would re-report an untouched file forever.
+3. **A file named `.pdf` has a suffix.** `QFileInfo::suffix()` returns `pdf` for
+   it, so the watcher would have processed a hidden file. Editors and download
+   tools write to a dot file and rename it into place, so hidden names are now
+   skipped outright. Caught by a test that expected a rejection.
+4. **Delegation must not change the output.** The daemon answers in JSON because
+   that is the wire format, and the first implementation printed that JSON even
+   when the caller had asked for the human line. Whether a daemon happened to be
+   running would have changed what the shell sees. The reply is now reformatted
+   into whichever shape the run asked for, and the exit code follows the bills.
+
+Measured on the two page Bertahütte receipt: a delegated call that the daemon had
+already cached returns in 14 ms, against 3.7 s for the same document read
+locally, because the daemon keeps the model resident.
 
 ---
 

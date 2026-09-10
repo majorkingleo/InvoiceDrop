@@ -1,8 +1,10 @@
 #include "cli.h"
 
 #include "analysis.h"
+#include "daemon.h"
 #include "extract/documentreader.h"
 #include "invoice.h"
+#include "json.h"
 #include "ollama.h"
 #include "paths.h"
 #include "store.h"
@@ -10,6 +12,10 @@
 #include <QCommandLineOption>
 #include <QCommandLineParser>
 #include <QCoreApplication>
+#include <QDBusConnection>
+#include <QDBusConnectionInterface>
+#include <QDBusInterface>
+#include <QDBusReply>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -83,9 +89,62 @@ QString archiveOriginal(const QString &path, QString *error)
     return target;
 }
 
-/// `invoicedrop history`. Lists what is stored, newest first.
-int runHistory(Store &store, int limit, bool asJson)
+/// Prints what a daemon returned in the shape this run asked for.
+///
+/// The daemon answers in JSON because that is the wire format, but the caller
+/// asked for either JSON or a line per bill. Reprinting the wire format either
+/// way would make the output depend on whether a daemon happened to be running.
+int printDelegatedResult(const QString &json, bool asJson)
 {
+    int failures = 0;
+
+    const QStringList lines = json.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    for (const QString &line : lines) {
+        const QJsonObject object = QJsonDocument::fromJson(line.toUtf8()).object();
+        if (object.isEmpty())
+            continue;
+
+        const QString status = object.value(QStringLiteral("status")).toString();
+        if (status != QStringLiteral("ok"))
+            ++failures;
+
+        if (asJson) {
+            out() << line << Qt::endl;
+            continue;
+        }
+
+        const QString file = object.value(QStringLiteral("file")).toString();
+        const int page = object.value(QStringLiteral("bill")).toInt();
+        const int pageCount = object.value(QStringLiteral("bill_count")).toInt();
+        const QString label = pageCount > 1 ? QStringLiteral("%1:%2").arg(file).arg(page) : file;
+
+        const QString vendor = object.value(QStringLiteral("vendor")).toString();
+        const QString date = object.value(QStringLiteral("date")).toString();
+        const QJsonValue total = object.value(QStringLiteral("gross_total"));
+        const QString currency = object.value(QStringLiteral("currency")).toString();
+
+        const QString amount = total.isDouble()
+            ? QLocale::system().toString(total.toDouble(), 'f', 2) + QLatin1Char(' ') + currency
+            : QStringLiteral("-");
+
+        out() << label << "  " << (vendor.isEmpty() ? QStringLiteral("-") : vendor) << "  "
+              << (date.isEmpty() ? QStringLiteral("-") : date) << "  " << amount << Qt::endl;
+
+        const QString warning = object.value(QStringLiteral("quality_warning")).toString();
+        const QString error = object.value(QStringLiteral("error")).toString();
+        if (!warning.isEmpty())
+            err() << label << ": warning: " << warning << Qt::endl;
+        if (!error.isEmpty())
+            err() << label << ": " << error << Qt::endl;
+    }
+
+    out().flush();
+    err().flush();
+    return failures;
+}
+
+/// `invoicedrop history`. Lists what is stored, newest first.
+int runHistory(Store &store, int limit, bool asJson){
     const QVector<StoredBill> bills = store.recent(qMax(1, limit));
 
     if (asJson) {
@@ -190,67 +249,6 @@ void printHuman(const Extract::Document &document, const Extract::ReadOptions &o
     stream.flush();
 }
 
-/// JSON for the extraction only view, where no model was consulted.
-QJsonObject extractionJson(const Extract::Document &document, bool withText)
-{
-    QJsonObject object;
-    object.insert(QStringLiteral("file"), QFileInfo(document.path).fileName());
-    object.insert(QStringLiteral("path"), document.path);
-    object.insert(QStringLiteral("kind"), Extract::kindName(document.kind));
-    object.insert(QStringLiteral("status"), document.ok() ? QStringLiteral("ok")
-                                                           : QStringLiteral("error"));
-    if (!document.error.isEmpty())
-        object.insert(QStringLiteral("error"), document.error);
-
-    object.insert(QStringLiteral("has_text_layer"), document.hasTextLayer);
-    object.insert(QStringLiteral("bill_count"), document.pages.size());
-    object.insert(QStringLiteral("text_chars"), static_cast<qint64>(document.text.size()));
-    object.insert(QStringLiteral("elapsed_ms"), document.elapsedMs);
-
-    QJsonArray notes;
-    for (const QString &note : document.notes)
-        notes.append(note);
-    object.insert(QStringLiteral("notes"), notes);
-
-    if (withText)
-        object.insert(QStringLiteral("text"), document.text);
-
-    return object;
-}
-
-/// JSON for one analysed bill. The invoice fields sit at the top level, so
-/// `jq '.vendor'` works without digging.
-QJsonObject billJson(const BillResult &bill)
-{
-    QJsonObject object;
-    object.insert(QStringLiteral("file"), QFileInfo(bill.path).fileName());
-    object.insert(QStringLiteral("path"), bill.path);
-    object.insert(QStringLiteral("bill"), bill.page);
-    object.insert(QStringLiteral("bill_count"), bill.pageCount);
-    object.insert(QStringLiteral("status"), bill.ok ? QStringLiteral("ok")
-                                                     : QStringLiteral("error"));
-    if (!bill.error.isEmpty())
-        object.insert(QStringLiteral("error"), bill.error);
-    if (!bill.qualityWarning.isEmpty())
-        object.insert(QStringLiteral("quality_warning"), bill.qualityWarning);
-
-    object.insert(QStringLiteral("has_text_layer"), bill.fromTextLayer);
-    object.insert(QStringLiteral("from_cache"), bill.fromCache);
-    object.insert(QStringLiteral("extract_ms"), bill.extractMs);
-    object.insert(QStringLiteral("inference_ms"), bill.inferMs);
-
-    QJsonArray notes;
-    for (const QString &note : bill.notes)
-        notes.append(note);
-    object.insert(QStringLiteral("notes"), notes);
-
-    const QJsonObject fields = bill.invoice.toJson();
-    for (auto entry = fields.constBegin(); entry != fields.constEnd(); ++entry)
-        object.insert(entry.key(), entry.value());
-
-    return object;
-}
-
 bool dumpPages(const Extract::Document &document, const QString &directory, QStringList *problems)
 {
     QDir target(directory);
@@ -349,6 +347,19 @@ int runCli(const QStringList &arguments)
         QStringLiteral("limit"),
         QStringLiteral("How many bills `history` lists."),
         QStringLiteral("count"), QStringLiteral("20"));
+    const QCommandLineOption inbox(
+        QStringLiteral("inbox"),
+        QStringLiteral("Folder the daemon watches."),
+        QStringLiteral("dir"), QDir(Paths::dataDir()).filePath(QStringLiteral("inbox")));
+    const QCommandLineOption once(
+        QStringLiteral("once"),
+        QStringLiteral("With `daemon`: read the inbox and exit instead of watching."));
+    const QCommandLineOption noNotify(
+        QStringLiteral("no-notify"),
+        QStringLiteral("With `daemon`: send no desktop notifications."));
+    const QCommandLineOption local(
+        QStringLiteral("local"),
+        QStringLiteral("Read the document here instead of asking a running daemon to do it."));
     const QCommandLineOption ocrShortEdge(
         QStringLiteral("ocr-short-edge"),
         QStringLiteral("Short edge OCR scales to before recognising. Tiny scans are magnified."),
@@ -386,6 +397,10 @@ int runCli(const QStringList &arguments)
     parser.addOption(noCache);
     parser.addOption(move);
     parser.addOption(limit);
+    parser.addOption(inbox);
+    parser.addOption(once);
+    parser.addOption(noNotify);
+    parser.addOption(local);
     parser.addOption(ocrShortEdge);
     parser.addOption(psm);
     parser.addOption(noNormalise);
@@ -412,10 +427,12 @@ int runCli(const QStringList &arguments)
         return kExitUsage;
     }
 
-    // `history` is the only subcommand so far. It is recognised as the first
-    // positional argument because everything else is a file to read.
+    // `history` and `daemon` are the subcommands. They are recognised as the
+    // first positional argument because everything else is a file to read.
     const bool historyMode =
         files.first() == QStringLiteral("history") && !parser.isSet(extractOnly);
+    const bool daemonMode =
+        files.first() == QStringLiteral("daemon") && !parser.isSet(extractOnly);
 
     if (parser.isSet(textOnly) && parser.isSet(imagesOnly)) {
         err() << "--text-only and --images-only cannot be combined" << Qt::endl;
@@ -453,6 +470,34 @@ int runCli(const QStringList &arguments)
     if (historyMode)
         return runHistory(store, parser.value(limit).toInt(), asJson);
 
+    // A running daemon already has the model loaded. Handing the work over turns
+    // a cold start into a queue entry, and the reply is the same JSON the local
+    // path would have produced. --no-cache and --dump-images stay local, because
+    // the daemon cannot honour them.
+    const bool delegatable = !extractOnlyMode && !parser.isSet(local)
+        && !parser.isSet(noCache) && !parser.isSet(dumpImages) && !daemonMode;
+
+    if (delegatable) {
+        const QDBusConnection bus = QDBusConnection::sessionBus();
+        QDBusConnectionInterface *busInterface = bus.isConnected() ? bus.interface() : nullptr;
+        if (busInterface
+            && busInterface->isServiceRegistered(QString::fromLatin1(Daemon::kServiceName))) {
+            QDBusInterface control(QString::fromLatin1(Daemon::kServiceName),
+                                   QString::fromLatin1(Daemon::kObjectPath),
+                                   QStringLiteral("org.kde.invoicedrop.Control"), bus);
+            if (control.isValid()) {
+                const QDBusReply<QString> reply = control.call(QStringLiteral("Analyze"), files);
+                if (reply.isValid()) {
+                    const int failures = printDelegatedResult(reply.value(), asJson);
+                    return failures == 0 ? kExitOk : kExitFailure;
+                }
+                err() << "the daemon did not answer (" << reply.error().message()
+                      << "), reading here instead" << Qt::endl;
+                err().flush();
+            }
+        }
+    }
+
     OllamaOptions ollamaOptions;
     if (parser.isSet(ollamaUrl))
         ollamaOptions.url = parser.value(ollamaUrl);
@@ -488,6 +533,37 @@ int runCli(const QStringList &arguments)
         }
     }
 
+    if (daemonMode) {
+        DaemonOptions daemonOptions;
+        daemonOptions.read = options;
+        daemonOptions.ollama = ollamaOptions;
+        daemonOptions.inbox = parser.value(inbox);
+        daemonOptions.notify = !parser.isSet(noNotify);
+        daemonOptions.watch = !parser.isSet(once);
+
+        Daemon daemon(daemonOptions, &store);
+        QString startError;
+        if (!daemon.start(&startError)) {
+            err() << startError << Qt::endl;
+            err().flush();
+            return kExitFailure;
+        }
+
+        if (!daemonOptions.watch) {
+            const int handled = daemon.drainInbox();
+            err() << "read " << handled << " file(s) from " << daemonOptions.inbox << Qt::endl;
+            err().flush();
+            return kExitOk;
+        }
+
+        err() << "watching " << daemonOptions.inbox << " with " << ollamaOptions.model
+              << "\ndatabase " << store.databasePath() << "\nnotifications "
+              << (daemonOptions.notify ? "on" : "off") << Qt::endl;
+        err().flush();
+
+        return QCoreApplication::exec();
+    }
+
     QJsonArray results;
     bool allOk = true;
 
@@ -511,14 +587,14 @@ int runCli(const QStringList &arguments)
             if (!document.ok()) {
                 allOk = false;
                 if (asJson)
-                    results.append(extractionJson(document, withText));
+                    results.append(extractionToJson(document, withText));
                 else
                     err() << QFileInfo(file).fileName() << ": " << document.error << Qt::endl;
                 err().flush();
                 continue;
             }
             if (asJson)
-                results.append(extractionJson(document, withText));
+                results.append(extractionToJson(document, withText));
             else
                 printHuman(document, options, withText);
             continue;
@@ -567,7 +643,7 @@ int runCli(const QStringList &arguments)
             }
 
             if (asJson) {
-                results.append(billJson(bill));
+                results.append(billToJson(bill));
             } else {
                 printAnalysisLine(bill.label(), bill.invoice);
                 if (!bill.qualityWarning.isEmpty()) {

@@ -39,8 +39,12 @@ add_library(invoicedrop-ai STATIC
     analysis.cpp
     hash.cpp
     invoice.cpp
+    daemon.cpp
+    inboxwatcher.cpp
+    notifier.cpp
     ollama.cpp
     paths.cpp
+    json.cpp
     store.cpp
 )
 
@@ -49,6 +53,7 @@ target_link_libraries(invoicedrop-ai
         invoicedrop-extract
         Qt6::Network
         Qt6::Sql
+        Qt6::DBus
 )
 
 target_include_directories(invoicedrop-ai
@@ -78,6 +83,23 @@ target_include_directories(invoicedrop PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 install(TARGETS invoicedrop
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+# ---------------------------------------------------------------------------
+# The daemon reaches the session bus two ways. The systemd user unit is the
+# normal one; the D-Bus service file lets the first CLI call start it on demand,
+# so nothing has to be enabled by hand for the tool to work after a login.
+# ---------------------------------------------------------------------------
+
+configure_file(${CMAKE_SOURCE_DIR}/data/invoicedrop.service.in
+               ${CMAKE_BINARY_DIR}/data/invoicedrop.service @ONLY)
+configure_file(${CMAKE_SOURCE_DIR}/data/org.kde.invoicedrop.service.in
+               ${CMAKE_BINARY_DIR}/data/org.kde.invoicedrop.service @ONLY)
+
+install(FILES ${CMAKE_BINARY_DIR}/data/invoicedrop.service
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/systemd/user)
+
+install(FILES ${CMAKE_BINARY_DIR}/data/org.kde.invoicedrop.service
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/dbus-1/services)
 
 # Convenience alias so both spellings work on a case sensitive filesystem.
 install(CODE "

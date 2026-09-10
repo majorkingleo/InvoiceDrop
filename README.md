@@ -25,6 +25,9 @@ sudo pacman -S --needed base-devel cmake ninja pkgconf \
     qt6-base libmupdf leptonica tesseract tesseract-data-deu tesseract-data-eng
 ```
 
+No KDE Frameworks are needed, in any phase built so far. Notifications go
+straight to `org.freedesktop.Notifications` and the D-Bus adaptor is plain Qt.
+
 MuPDF, Leptonica and Tesseract are all needed to build. At runtime Tesseract is
 reached only through `--ocr`, so a document with a text layer, and a page image
 sent to the model, are both read without it.
@@ -181,6 +184,15 @@ invoicedrop *.pdf; and echo "alle gelesen"
 | `--no-cache` | read the document again instead of using the store |
 | `--move` | move the original into the archive once every bill was read |
 | `--limit N` | how many bills `history` lists, default 20 |
+| `--local` | read here instead of asking a running daemon to do it |
+
+### Daemon
+
+| Option | Effect |
+|--------|--------|
+| `--inbox DIR` | folder to watch, default `~/.local/share/invoicedrop/inbox` |
+| `--once` | read the inbox and exit instead of watching |
+| `--no-notify` | send no desktop notifications |
 
 ### OCR tuning
 
@@ -239,8 +251,52 @@ invoicedrop --model gemma4:latest --json rechnung.pdf | jq '.gross_total'
 invoicedrop --model minicpm-v:8b     --json rechnung.pdf | jq '.gross_total'
 ```
 
-## Cache and history
+## The daemon
 
+Reading a document in a fresh process pays the model load every time, which
+dominates the wall clock for a single file. The daemon pays it once and then
+watches a folder:
+
+```fish
+invoicedrop daemon                    # watch ~/.local/share/invoicedrop/inbox
+invoicedrop daemon --once             # read what is there and exit
+invoicedrop daemon --inbox ~/Belege   # watch somewhere else
+```
+
+Drop a file into the folder and it is read, stored, announced with a desktop
+notification, and printed as JSON on stdout. `--no-notify` silences the toast.
+
+While the daemon runs, the CLI hands its work over instead of reading locally,
+because the daemon already has the model resident:
+
+```
+$ invoicedrop rechnung.pdf          # 14 ms, the daemon had it cached
+$ invoicedrop --local rechnung.pdf  # 3.7 s, read here
+```
+
+The output and the exit code are identical either way; only the work moves.
+`--local`, `--no-cache` and `--dump-images` always read here, since the daemon
+cannot honour them.
+
+### Starting it automatically
+
+`cmake --install` places two files so the daemon can be started by the system or
+by the bus:
+
+| File | Goes to |
+|------|---------|
+| `invoicedrop.service` | `${XDG_DATA_HOME:-~/.local/share}/../systemd/user`, as a user unit |
+| `org.kde.invoicedrop.service` | the D-Bus service directory, for on-demand activation |
+
+```fish
+systemctl --user enable --now invoicedrop     # after installing
+systemctl --user status invoicedrop
+```
+
+Without enabling anything, the first CLI call starts the daemon through D-Bus
+activation.
+
+## Cache and history
 Every bill that is read is stored in SQLite, so the second run of a document
 costs nothing: extraction drops to 0 ms and the model is not called at all.
 
