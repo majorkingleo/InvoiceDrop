@@ -6,6 +6,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QLocale>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 
@@ -50,6 +51,8 @@ private slots:
 
     // -------------------------------------------------------- notifications
     void notificationListsOneLinePerBill();
+    void notificationAddsUpTheFile();
+    void notificationSaysWhenTheSumIsPartial();
     void notificationNamesTheFailedBill();
     void notificationIsSilentWhenDisabled();
 };
@@ -176,10 +179,58 @@ void TestDaemon::notificationListsOneLinePerBill()
     const QString body = Notifier::bodyFor(QStringLiteral("beleg.pdf"), bills);
     const QStringList lines = body.split(QLatin1Char('\n'));
 
-    QCOMPARE(lines.size(), 2);
+    // Two bills and the sum they add up to.
+    QCOMPARE(lines.size(), 3);
     QVERIFY(lines.at(0).contains(QStringLiteral("beleg.pdf p1")));
     QVERIFY(lines.at(1).contains(QStringLiteral("beleg.pdf p2")));
     QVERIFY(lines.at(0).contains(QStringLiteral("BERTAHÜTTE")));
+}
+
+void TestDaemon::notificationAddsUpTheFile()
+{
+    QVector<BillResult> bills;
+    bills.append(makeBill(1, QStringLiteral("Tank Roth GmbH"), 65.50));
+    bills.append(makeBill(2, QStringLiteral("Eni Service-Station"), 90.91));
+    bills.append(makeBill(3, QStringLiteral("Tank Roth GmbH"), 21.35));
+
+    const QString body = Notifier::bodyFor(QStringLiteral("tanken.pdf"), bills);
+    const QStringList lines = body.split(QLatin1Char('\n'));
+
+    QCOMPARE(lines.size(), 4);
+    QVERIFY(lines.last().contains(QStringLiteral("tanken.pdf: sum")));
+
+    // Built with the same formatter the notification uses, so this asserts that
+    // the three amounts were added up rather than asserting what a decimal
+    // separator looks like on the machine running the suite.
+    const QString sum = QLocale::system().toString(177.76, 'f', 2) + QStringLiteral(" EUR");
+    QVERIFY(lines.last().contains(sum));
+    QVERIFY(!lines.last().contains(QStringLiteral("65")));
+
+    // Nothing is missing, so nothing is claimed to be missing. A toast has no
+    // room for reassurance.
+    QVERIFY(!lines.last().contains(QStringLiteral("bills")));
+}
+
+void TestDaemon::notificationSaysWhenTheSumIsPartial()
+{
+    // The page count says the file holds three bills and only one arrived, so
+    // the total is not the file's total and the toast has to say so.
+    QVector<BillResult> bills;
+    bills.append(makeBill(1, QStringLiteral("Tank Roth GmbH"), 65.50));
+
+    BillResult second;
+    second.page = 2;
+    second.pageCount = 3;
+    second.ok = false;
+    second.error = QStringLiteral("nothing to send: no text and no page images");
+    bills.append(second);
+
+    const QString body = Notifier::bodyFor(QStringLiteral("tanken.pdf"), bills);
+    const QStringList lines = body.split(QLatin1Char('\n'));
+
+    QCOMPARE(lines.size(), 3);
+    QVERIFY(lines.last().contains(QStringLiteral("1 of 3 bill")));
+    QVERIFY(lines.last().contains(QStringLiteral("1 unread")));
 }
 
 void TestDaemon::notificationNamesTheFailedBill()

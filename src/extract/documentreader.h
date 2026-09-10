@@ -99,6 +99,14 @@ struct Document {
     DocumentKind kind = DocumentKind::Unknown;
     bool hasTextLayer = false;
 
+    /// Pages the file holds, whether or not they were read.
+    ///
+    /// `pages` below is capped by ReadOptions::maxPages, so it cannot answer
+    /// this. The difference is the whole point: a sum over the first four pages
+    /// of a twenty page collection has to be able to say that it covers four of
+    /// twenty, and a caller that only sees the pages it asked for cannot.
+    int pageCount = 0;
+
     /// Every page that was read, in order, whether or not it was rasterised.
     QVector<DocumentPage> pages;
 

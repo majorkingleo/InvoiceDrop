@@ -52,6 +52,20 @@ target_link_libraries(tst_store
 
 add_test(NAME store COMMAND tst_store)
 
+# The per file sums. Pure arithmetic on bills, so it needs neither a model nor a
+# file, which is why it can check the cases a real run only reaches by accident:
+# a mixed currency file, a bill that failed inside a sum that still adds up, and
+# a file cut in half by the page limit.
+qt_add_executable(tst_totals tst_totals.cpp)
+
+target_link_libraries(tst_totals
+    PRIVATE
+        invoicedrop-ai
+        Qt6::Test
+)
+
+add_test(NAME totals COMMAND tst_totals)
+
 qt_add_executable(tst_daemon tst_daemon.cpp)
 
 target_link_libraries(tst_daemon

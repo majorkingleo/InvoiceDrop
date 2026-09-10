@@ -159,6 +159,51 @@ bill. A two page scan produces two lines.
 Problems go to stderr, results to stdout, so redirecting the results never
 swallows a warning.
 
+## The file total
+
+After the bills of a file that holds more than one, the file is added up:
+
+```
+GuSp_SoLa2025_Tanken_Rechnungen.pdf:1  Tank Roth GmbH       2023-07-15   65,50 EUR
+GuSp_SoLa2025_Tanken_Rechnungen.pdf:2  Eni Service-Station  2025-07-26   90,91 EUR
+GuSp_SoLa2025_Tanken_Rechnungen.pdf:3  Tank Roth GmbH       2022-07-27   21,35 EUR
+GuSp_SoLa2025_Tanken_Rechnungen.pdf  sum  177,76 EUR  (3 bills)
+```
+
+A file with a single bill gets no total line: it would repeat the line above it
+word for word. The same rule applies to the widget, where the total is drawn as a
+tinted row under the last card of a file, and to the notification.
+
+**The count in brackets is the point of the line.** `177,76 EUR` on its own claims
+nothing; `177,76 EUR  (3 bills)` claims that three bills are inside it, and that
+claim can be checked against the file. When it does not hold, the line says so
+instead of quietly summing the part it has:
+
+```
+tanken.pdf  sum  156,41 EUR  (2 of 5 bills)
+tanken.pdf  sum   15,50 EUR  (2 of 3 bills, 1 unread)
+tanken.pdf  sum   15,00 EUR  (2 of 3 bills, 1 without an amount)
+```
+
+* `2 of 5 bills` — the file holds five, the page limit or the history cut it
+  down. `--pages 2` on a five page file reports two of five.
+* `1 unread` — a bill that could not be read at all. Worth retrying.
+* `1 without an amount` — the page was read, the model found no total on it.
+
+Two further rules that keep the number from lying:
+
+* **Currencies are never added together.** A file with a euro bill and a dollar
+  bill prints `10,00 EUR + 5,00 USD`. Adding them would produce a number that is
+  not money.
+* **Amounts are summed in cents.** Adding the amounts as they arrive gives
+  `0.1 + 0.2 = 0.30000000000000004`, and a total that is wrong in the last digit
+  is a total nobody checks twice.
+
+`--json` is unchanged: one object per bill per line, with no summary line. The
+widget adds up in JavaScript from the bills it received, and a consumer that wants
+a total from the JSON can ask `jq` for one. Putting a second kind of object on the
+wire would make every consumer learn to skip it.
+
 ## JSON output
 
 `--json` prints **one object per line**, whatever the number of files. That is
@@ -327,10 +372,18 @@ invoicedrop --model minicpm-v:8b     --json rechnung.pdf | jq '.gross_total'
 
 A panel widget that takes the same drop. Drag an invoice onto it and a card
 appears with the shop, the date and the sum; a document with several pages
-produces several cards, because a bill is a page.
+produces several cards, because a bill is a page, and a tinted row under the last
+of them carries the file's total.
 
 The widget owns no logic. It builds the same command the shell would and reads
 the same JSON, so a drop cannot behave differently from a terminal run.
+
+The total under a file is the one number the widget works out itself, because the
+JSON deliberately carries no summary line. It follows the same rules as the
+command line: never across currencies, in cents, only for a file with more than
+one bill, and with the count beside it. A file that was cut by the list's history
+limit is summed over the part that is on screen and says so, since the file's own
+page count is in every reply.
 
 ```fish
 kpackagetool6 --type Plasma/Applet --install plasmoid/com.github.invoicedrop
@@ -351,6 +404,27 @@ plasmawindowed com.github.invoicedrop    # watch for errors in the terminal
 Settings are available in the widget's own configuration dialog: the binary path,
 the model, how many bills to keep in the list, and whether a document should be
 moved into the archive once it was read.
+
+### Reloading the widget
+
+Plasma compiles a widget's QML once and keeps it, so a changed `main.qml` does
+nothing until the shell reads the package again. There is no per-applet reload.
+Logging out is not needed; restarting the shell does the same thing in a second:
+
+```fish
+systemctl --user restart plasma-plasmashell.service
+```
+
+The panels are recreated, running programs are untouched, and the widget keeps its
+place, because the layout lives in `plasma-org.kde.plasma.desktop-appletsrc`
+rather than in the shell. In VS Code this is **Tasks: Run Task → Plasma: reload
+widget**, which installs the current tree first and then restarts the shell. That
+is the whole loop: change the QML, run the task, click the widget.
+
+`plasmawindowed com.github.invoicedrop` is the faster loop and needs neither an
+install nor a restart, because it reads the package from disk on every start. It
+shows the widget in its own window instead of in the panel, which is the only
+difference that matters while working on the widget itself.
 
 ## The daemon
 
@@ -513,8 +587,10 @@ invoicedrop --extract-only rechnung.pdf | head -40
 ```
 
 **Every page of a long PDF is not read.**
-`--pages` defaults to 4. A collection of receipts needs a higher value, and note
-that one file currently produces one record.
+`--pages` defaults to 4, and a collection of receipts needs a higher value. The
+file's own total then says what it covers: a five page file read with
+`--pages 2` reports `sum ... (2 of 5 bills)` rather than claiming to be the whole
+file.
 
 **Nothing works and you do not know where to start.**
 
@@ -543,10 +619,11 @@ src/                    the binary
   analysis.{h,cpp}      the pipeline: read, cache, infer, one record per bill
   invoice.{h,cpp}       the invoice model and all format normalisation
   invoice-schema.h      the JSON schema sent to the model
+  totals.{h,cpp}        what one file adds up to, and what is missing from it
   ollama.{h,cpp}        the HTTP client
   store.{h,cpp}         SQLite: documents, bills, the settings fingerprint
   extract/              document reading: MuPDF, Leptonica, Tesseract
-tests/                  five suites, run with ctest
+tests/                  six suites, run with ctest
   testdata/             real invoices plus their expected results
 docs/architecture.md    how it works and why
 docs/plan.md            what each phase delivered

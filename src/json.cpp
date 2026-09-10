@@ -49,6 +49,30 @@ QString billsToJsonLines(const QVector<BillResult> &bills)
     return out;
 }
 
+BillResult billFromJson(const QJsonObject &object)
+{
+    BillResult bill;
+
+    // The daemon writes both, and the file name is the fallback so that a bill
+    // rebuilt from a hand written object still has a label.
+    bill.path = object.value(QStringLiteral("path")).toString();
+    if (bill.path.isEmpty())
+        bill.path = object.value(QStringLiteral("file")).toString();
+
+    bill.page = object.value(QStringLiteral("bill")).toInt(1);
+    bill.pageCount = object.value(QStringLiteral("bill_count")).toInt(1);
+    bill.ok = object.value(QStringLiteral("status")).toString() == QStringLiteral("ok");
+    bill.error = object.value(QStringLiteral("error")).toString();
+    bill.qualityWarning = object.value(QStringLiteral("quality_warning")).toString();
+    bill.fromTextLayer = object.value(QStringLiteral("has_text_layer")).toBool();
+    bill.fromCache = object.value(QStringLiteral("from_cache")).toBool();
+    bill.extractMs = static_cast<qint64>(object.value(QStringLiteral("extract_ms")).toDouble());
+    bill.inferMs = static_cast<qint64>(object.value(QStringLiteral("inference_ms")).toDouble());
+    bill.invoice = Invoice::fromJson(object);
+
+    return bill;
+}
+
 QJsonObject extractionToJson(const Extract::Document &document, bool withText)
 {
     QJsonObject object;

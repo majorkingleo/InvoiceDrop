@@ -24,4 +24,11 @@ QString billsToJsonLines(const QVector<BillResult> &bills);
 /// JSON for the extraction only view, where no model was consulted.
 QJsonObject extractionToJson(const Extract::Document &document, bool withText);
 
+/// The inverse of `billToJson`.
+///
+/// A delegated run gets its answer back as JSON and has to print the same lines
+/// and the same sum a local run prints. Rebuilding the bills is what lets both
+/// paths go through one implementation instead of two that drift apart.
+BillResult billFromJson(const QJsonObject &object);
+
 } // namespace InvoiceDrop

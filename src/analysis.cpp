@@ -99,13 +99,22 @@ QVector<BillResult> analyseFile(const QString &path,
         return bills;
     }
 
-    const int pageCount = qMax(1, document.pages.size());
+    // Two different counts, and mixing them up broke --pages within a minute of
+    // being written. `billsToProduce` is how many bills this run reads: one per
+    // page that was actually extracted. `filePages` is how many the file holds,
+    // which is what a bill carries and what lets a sum say it covers two of
+    // three. Producing a bill per page of the file instead would ask the model
+    // about pages the page limit deliberately skipped, and answer with an error
+    // for each of them.
+    const int filePages = document.pageCount > 0 ? document.pageCount
+                                                 : qMax(1, document.pages.size());
+    const int billsToProduce = qMax(1, document.pages.size());
 
-    for (int index = 0; index < pageCount; ++index) {
+    for (int index = 0; index < billsToProduce; ++index) {
         BillResult bill;
         bill.path = path;
         bill.page = index + 1;
-        bill.pageCount = pageCount;
+        bill.pageCount = filePages;
         bill.extractMs = document.elapsedMs;
         bill.notes = document.notes;
 

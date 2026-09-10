@@ -238,7 +238,7 @@ bool Store::save(const QString &sha256,
     insertDocument.addBindValue(fingerprint);
     insertDocument.addBindValue(document.path);
     insertDocument.addBindValue(fileName);
-    insertDocument.addBindValue(bills.size());
+    insertDocument.addBindValue(document.pageCount > 0 ? document.pageCount : bills.size());
     insertDocument.addBindValue(document.hasTextLayer ? 1 : 0);
     insertDocument.addBindValue(model);
     insertDocument.addBindValue(createdAt);

@@ -46,6 +46,7 @@ add_library(invoicedrop-ai STATIC
     paths.cpp
     json.cpp
     store.cpp
+    totals.cpp
 )
 
 target_link_libraries(invoicedrop-ai

@@ -65,6 +65,7 @@ void readImage(const QString &path, const ReadOptions &options, Document *docume
     if (page.jpeg.isEmpty() && page.text.isEmpty())
         document->error = QStringLiteral("nothing usable could be read from the image");
 
+    document->pageCount = 1;
     document->pages.append(page);
     document->text = page.text;
 }

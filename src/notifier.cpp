@@ -2,6 +2,7 @@
 
 #include "analysis.h"
 #include "invoice.h"
+#include "totals.h"
 
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
@@ -87,6 +88,19 @@ QString Notifier::bodyFor(const QString &fileName, const QVector<BillResult> &bi
 
         body += QStringLiteral("%1: %2, %3, %4").arg(where, shop, date, amount);
     }
+
+    // A file with several bills gets a total, because that is the number the
+    // reader wants and the lines above are the evidence for it. The caveat is
+    // only appended when it applies: a toast has no room for reassurance, and a
+    // total that covers fewer bills than the file holds has to say so.
+    if (bills.size() > 1) {
+        const FileTotal total = totalFor(bills);
+        body += QLatin1Char('\n');
+        body += QStringLiteral("%1: sum %2").arg(fileName, formatTotal(total));
+        if (!total.complete())
+            body += QStringLiteral(" (%1)").arg(formatCoverage(total));
+    }
+
     return body;
 }
 

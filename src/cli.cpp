@@ -10,6 +10,7 @@
 #include "ollama.h"
 #include "paths.h"
 #include "store.h"
+#include "totals.h"
 
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -91,6 +92,10 @@ QString archiveOriginal(const QString &path, QString *error)
     return target;
 }
 
+/// Prints what a file adds up to. Defined below, next to the line printer it
+/// finishes off.
+void printFileSum(const QVector<BillResult> &bills);
+
 /// Prints what a daemon returned in the shape this run asked for.
 ///
 /// The daemon answers in JSON because that is the wire format, but the caller
@@ -100,45 +105,62 @@ int printDelegatedResult(const QString &json, bool asJson)
 {
     int failures = 0;
 
+    // The daemon answers with one bill per line, and the sum belongs after the
+    // last bill of a file. A delegated run therefore has to group again, and it
+    // does so through the same BillResult the local path uses, so a run with a
+    // daemon and a run without one print the same thing.
+    QVector<BillResult> run;
+
+    const auto flushRun = [&run]() {
+        if (run.size() > 1)
+            printFileSum(run);
+        run.clear();
+    };
+
     const QStringList lines = json.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
     for (const QString &line : lines) {
         const QJsonObject object = QJsonDocument::fromJson(line.toUtf8()).object();
         if (object.isEmpty())
             continue;
 
-        const QString status = object.value(QStringLiteral("status")).toString();
-        if (status != QStringLiteral("ok"))
-            ++failures;
-
         if (asJson) {
+            // Passed through untouched. Adding a summary line here would put a
+            // second kind of object on the wire and every consumer would have to
+            // learn to skip it.
+            if (object.value(QStringLiteral("status")).toString() != QStringLiteral("ok"))
+                ++failures;
             out() << line << Qt::endl;
             continue;
         }
 
-        const QString file = object.value(QStringLiteral("file")).toString();
-        const int page = object.value(QStringLiteral("bill")).toInt();
-        const int pageCount = object.value(QStringLiteral("bill_count")).toInt();
-        const QString label = pageCount > 1 ? QStringLiteral("%1:%2").arg(file).arg(page) : file;
+        const BillResult bill = billFromJson(object);
+        if (!bill.ok)
+            ++failures;
 
-        const QString vendor = object.value(QStringLiteral("vendor")).toString();
-        const QString date = object.value(QStringLiteral("date")).toString();
-        const QJsonValue total = object.value(QStringLiteral("gross_total"));
-        const QString currency = object.value(QStringLiteral("currency")).toString();
+        if (!run.isEmpty() && run.last().path != bill.path)
+            flushRun();
+        run.append(bill);
 
-        const QString amount = total.isDouble()
-            ? QLocale::system().toString(total.toDouble(), 'f', 2) + QLatin1Char(' ') + currency
+        const QString label = bill.label();
+        const QString vendor = bill.invoice.vendor.isEmpty() ? QStringLiteral("-")
+                                                             : bill.invoice.vendor;
+        const QString date = bill.invoice.date.isEmpty() ? QStringLiteral("-")
+                                                          : bill.invoice.date;
+        const QString amount = bill.invoice.grossTotal.has_value()
+            ? QLocale::system().toString(*bill.invoice.grossTotal, 'f', 2) + QLatin1Char(' ')
+                + bill.invoice.currency
             : QStringLiteral("-");
 
-        out() << label << "  " << (vendor.isEmpty() ? QStringLiteral("-") : vendor) << "  "
-              << (date.isEmpty() ? QStringLiteral("-") : date) << "  " << amount << Qt::endl;
+        out() << label << "  " << vendor << "  " << date << "  " << amount << Qt::endl;
 
-        const QString warning = object.value(QStringLiteral("quality_warning")).toString();
-        const QString error = object.value(QStringLiteral("error")).toString();
-        if (!warning.isEmpty())
-            err() << label << ": warning: " << warning << Qt::endl;
-        if (!error.isEmpty())
-            err() << label << ": " << error << Qt::endl;
+        if (!bill.qualityWarning.isEmpty())
+            err() << label << ": warning: " << bill.qualityWarning << Qt::endl;
+        if (!bill.error.isEmpty())
+            err() << label << ": " << bill.error << Qt::endl;
     }
+
+    if (!asJson)
+        flushRun();
 
     out().flush();
     err().flush();
@@ -318,6 +340,25 @@ void printAnalysisLine(const QString &label, const Invoice &invoice)
     const QString date = invoice.date.isEmpty() ? QStringLiteral("-") : invoice.date;
 
     out() << label << "  " << vendor << "  " << date << "  " << amount << Qt::endl;
+    out().flush();
+}
+
+/// Prints what a file adds up to.
+///
+/// Only for a file that holds more than one bill. A single page file would get a
+/// sum line that repeats the line above it word for word, and a report full of
+/// duplicated lines is harder to read than one without sums at all.
+///
+/// The bill count is printed even when nothing is missing, because a total
+/// without it cannot be checked against the file: `177,76 EUR` claims nothing,
+/// `177,76 EUR (3 bills)` claims that three bills are in there.
+void printFileSum(const QVector<BillResult> &bills)
+{
+    const FileTotal total = totalFor(bills);
+    const QString name = QFileInfo(bills.first().path).fileName();
+
+    out() << name << "  sum  " << formatTotal(total) << "  (" << formatCoverage(total) << ')'
+          << Qt::endl;
     out().flush();
 }
 
@@ -793,6 +834,12 @@ int runCli(const QStringList &arguments)
                 }
             }
         }
+
+        // After the file's bills, not after each one: the sum belongs to the
+        // file, and printing it between two bills of the same file would read as
+        // a total for the first one.
+        if (!asJson && bills.size() > 1)
+            printFileSum(bills);
     }
 
     if (asJson) {

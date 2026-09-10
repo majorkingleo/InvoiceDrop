@@ -27,6 +27,7 @@ file watcher. Non-goals until phase 5: no QML at all.
 | 4 | Daemon: inbox watch, DBus, notifications | `invoicedrop daemon` | **done** |
 | 5 | Plasma widget | drag and drop in the panel | **done** |
 | 6 | Packaging, PKGBUILD, doctor | `pacman -U` | **done** |
+| 7 | Sum per file, in the CLI, the widget and the toast | `invoicedrop bills/*.pdf` | **done** |
 
 Phase 2 is the first point where the tool is useful. Everything after that is
 ergonomics, automation and presentation.
@@ -429,9 +430,25 @@ reply it parses and the labels it renders are all checked; the gesture is not.
 Verified by hand instead with `plasmawindowed com.github.invoicedrop`, which
 loads the package with no QML warnings.
 
-The widget needs `invoicedrop` on the PATH that Plasma sees; `cmake --install`
-puts it in `/usr/local/bin`. `~/.local/bin/invoicedrop` is a symlink to the build
-tree for development.
+**A changed widget needs the shell restarted, not the session.** Plasma compiles
+an applet's QML once and holds it, so editing `main.qml` and reinstalling changes
+nothing on screen, and there is no per-applet reload to ask for. On Plasma 6 the
+shell is owned by a user unit, so
+
+```bash
+systemctl --user restart plasma-plasmashell.service
+```
+
+is the whole operation: about a second, panels recreated, running programs
+untouched, and the widget keeps its place because the layout lives in
+`plasma-org.kde.plasma.desktop-appletsrc`. The `Plasma: reload widget` task wraps
+this and installs the tree first. `plasmawindowed` remains the faster loop while
+working on the QML itself, since it rereads the package on every start, but it
+does not exercise the panel's own loading path.
+
+The widget needs `invoicedrop` on the PATH that Plasma sees. Either spelling
+works: the package puts it in `/usr/local/bin`, and the local install task puts it
+in `~/.local/bin`, which is on the PATH of a normal login shell.
 
 ---
 
@@ -518,6 +535,60 @@ What phase 6 actually found:
 
 ---
 
+## Phase 7 — A sum per file
+
+A collection PDF holds twenty receipts and the number anyone wants from it is
+one total. Every file that holds more than one bill now gets a total line, and
+the widget draws the same total as a row under the last card of a file.
+
+Delivered:
+
+- `src/totals.{h,cpp}` — `totalFor`, `formatTotal`, `formatCoverage`. Used by the
+  CLI, by the delegated path and by the notification.
+- The widget adds up in `invoicelogic.js` (`subtotalsFor`) and draws it in
+  `contents/ui/FileSum.qml`.
+- `tests/tst_totals.cpp`, plus new cases in `tst_plasmoid.qml` and
+  `tst_daemon.cpp`. Six suites now.
+- `Document::pageCount` — the file's own page count, which did not exist before.
+
+What this phase actually found:
+
+- **A total is worth nothing without its coverage.** Every sum is printed with
+  the count it covers, and says `2 of 5 bills` when the count is not the whole
+  file: cut by `--pages`, cut by the widget's history limit, or one bill that
+  could not be read. The rule is that the number and its scope are printed or
+  neither is.
+- **The extraction layer only knew how many pages it had read.** `Document` was
+  capped by `ReadOptions::maxPages`, so a five page file read with `--pages 2`
+  looked like a two page file and its total looked complete. `Document::pageCount`
+  now carries `fz_count_pages`. Without it this phase would have shipped a
+  confident wrong number, which is worse than no sum at all.
+- **Bills and file pages had to be separated, and the first version did not.**
+  Iterating the file's page count meant `--pages 1` on a three page file produced
+  three bills, two of them failures for pages the page limit had deliberately
+  skipped. A page limit is a decision, not an error. It was caught within a
+  minute of being written, by running the flag.
+- **Currencies are not added together, and amounts are added in cents.** A mixed
+  file prints `10,00 EUR + 5,00 USD`. Summing doubles gives 0.1 + 0.2 =
+  0.30000000000000004 and the display shows the tail.
+- **The JSON contract was left alone.** One object per bill per line, no summary
+  object. The widget sums in JavaScript from what it received, and the earlier
+  lesson about the shape of stdout is what settled it: a second kind of object on
+  the wire is a rule every consumer has to remember.
+- **`FileSum.qml` could not be tested outside Plasma.** `i18n` and `i18np` are
+  injected by the Plasma runtime and do not exist under `qmlscene6`, so the suite
+  covers the arithmetic and not the wording. The component was checked by running
+  it in `plasmawindowed` in a throwaway plasmoid, which is the only way to reach
+  the real runtime.
+
+Decided, and easy to reverse if it turns out to be wrong: **a file with a single
+bill gets no total.** The total would repeat the amount already on the line, on
+the card and in the toast. The rule is in three places — `bills.size() > 1` in
+`printFileSum`, `run.length > 1` in `subtotalsFor`, and `bills.size() > 1` in
+`Notifier::bodyFor`.
+
+---
+
 ## Build commands
 
 Packages:
@@ -582,6 +653,8 @@ from the build tree.
   notification text. No bus and no model needed.
 * `tst_plasmoid.qml` — the widget's command builder and reply parser, run under
   `qmlscene6`.
+* `tst_totals` — the per file sums: mixed currencies, a bill that failed inside a
+  total that still adds up, a file cut by the page limit, and cent rounding.
 * `tst_bills` — an integration suite. It needs Ollama and skips itself without
   one, and it is the only suite that can be red for a model's reasons rather than
   the code's.

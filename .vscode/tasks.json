@@ -261,6 +261,47 @@
                 "group": "install"
             }
         },
+        // -------------------------------------------------------------- plasma
+        // Plasma loads a widget once and keeps the compiled QML in memory, so a
+        // changed main.qml does nothing until the shell reads the package again.
+        // There is no per-applet reload: restarting plasmashell is the supported
+        // way, and on Plasma 6 it is owned by a user unit, which makes this a
+        // one line and a second, with the panels recreated and nothing else
+        // disturbed. The widget keeps its place because the panel layout lives
+        // in plasma-org.kde.plasma.desktop-appletsrc, not in the shell.
+        {
+            "label": "Plasma: reload widget (install + restart plasmashell)",
+            "detail": "Installs the current tree into ~/.local and then restarts the shell, which is what makes the panel read the changed QML. Logging out is not needed and would only do the same thing more slowly. Verified on Plasma 6.7.5 Wayland: plasmashell is owned by plasma-plasmashell.service and comes back with a new PID in about a second. If the unit is missing the task falls back to quitting and starting plasmashell by hand, which is only correct when nothing else owns the process.",
+            "type": "shell",
+            "command": "systemctl --user restart plasma-plasmashell.service; or begin; echo 'no plasma-plasmashell.service, restarting plasmashell by hand'; kquitapp6 plasmashell; kstart plasmashell; end",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "Install: local (build + install to ~/.local)",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true,
+                "group": "plasma"
+            }
+        },
+        {
+            "label": "Plasma: try widget in a window",
+            "detail": "Reads the package from disk on every start, so it needs neither an install nor a shell restart. The fastest way to look at a QML change, at the cost of showing the widget in its own window instead of in the panel. Close the window to end the task.",
+            "type": "shell",
+            "command": "plasmawindowed com.github.invoicedrop",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "group": "plasma"
+            }
+        },
         // --------------------------------------------------------------- test
         {
             "label": "Test: run (ctest)",

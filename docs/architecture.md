@@ -262,6 +262,60 @@ bills is treated as a miss and read again, rather than reported as nothing.
    and prints the same JSON the CLI prints; the applet renders vendor, date, total
    and currency.
 
+## What a file adds up to
+
+A collection PDF holds twenty receipts, and the number anyone actually wants from
+it is their sum. `totals.{h,cpp}` produces it, and the CLI, the notification and
+the widget all go through it or through the same rules.
+
+The sum is the easy part. The hard part is that a sum can be wrong while looking
+perfectly reasonable, so most of the module is about what a total covers:
+
+* **Currencies are never added together.** A file with a euro and a dollar bill
+  reports `10,00 EUR + 5,00 USD`. `totalFor` keeps one running total per currency.
+* **Amounts are summed in cents.** `totalFor` converts each amount with
+  `qRound64(amount * 100)`. Adding doubles gives `0.1 + 0.2 =
+  0.30000000000000004`, and the display would show the tail of it.
+* **A bill that failed is counted, not summed.** It stays out of the total and
+  lands in `failed`, which becomes `1 unread`. A bill that was read but had no
+  total on it is a separate case and becomes `1 without an amount`, because one
+  is worth retrying and the other is not.
+* **A file that holds more than the sum covers says so.** `2 of 5 bills`. This is
+  what the page count is for, and it is the reason the extraction layer had to
+  start reporting the file's page count rather than the number of pages read.
+
+That last point produced the only real bug in this feature. `Document` used to
+expose only the pages that were read, since `ReadOptions::maxPages` caps them. A
+sum built on that cannot tell a five page file read with `--pages 2` from a two
+page file, so it would have claimed `2 bills` and looked complete. `Document` now
+carries both numbers, and `analyseFile` keeps them apart:
+
+* `Document::pageCount` — pages the file holds, straight from `fz_count_pages`.
+* `Document::pages` — pages that were actually read.
+* `BillResult::pageCount` — the file's count, which is what a total needs and
+  what the `file.pdf:2` label is about.
+* The loop that produces bills runs over the pages that were read.
+
+Mixing the last two up was tried: iterating over the file's page count on a
+`--pages 1` run asked the model about pages the page limit had deliberately
+skipped, and answered with a failed bill for each. A page limit is a decision, not
+an error.
+
+The JSON contract is deliberately untouched by all of this. One object per bill
+per line, no summary line: the widget adds up in JavaScript from the bills it
+received, and a shell consumer can ask `jq`. A second kind of object on the wire
+would force every consumer to learn to skip it, which is the sort of thing that
+gets forgotten in one place and not another.
+
+The widget's version of the same rules lives in `invoicelogic.js`, because it has
+to work on what the reply contains, and the list it sums is not always the whole
+file: the history limit can cut a group in half. `subtotalsFor` walks the list in
+runs of one file, returns a parallel array of `null` with a total at the last bill
+of each run, and reports `2 of 5` when the run is shorter than the file's page
+count. It formats in the locale it is handed rather than calling `Qt.locale()`
+itself, which is what lets `tst_plasmoid.qml` pin `de_DE` and assert on the
+separators.
+
 ## Ollama integration
 
 ```http

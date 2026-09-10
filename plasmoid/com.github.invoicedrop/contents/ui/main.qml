@@ -17,6 +17,11 @@ PlasmoidItem {
     property int running: 0
     property string statusText: ""
 
+    /// One entry per bill, `null` except at the last bill of a file, where the
+    /// file's total sits. Recomputed whenever the list changes, which is also
+    /// what keeps it correct when the history limit cuts a file in half.
+    readonly property var subtotals: Logic.subtotalsFor(bills, Qt.locale())
+
     preferredRepresentation: fullRepresentation
 
     // --------------------------------------------------------------- pipeline
@@ -161,10 +166,29 @@ PlasmoidItem {
                 model: root.bills
                 visible: root.bills.length > 0
 
-                delegate: InvoiceCard {
+                delegate: ColumnLayout {
                     width: list.width
-                    bill: modelData
-                    showDivider: index < list.count - 1
+                    spacing: 0
+
+                    InvoiceCard {
+                        Layout.fillWidth: true
+                        bill: modelData
+                        // No line before a subtotal. The sum belongs to the cards
+                        // above it, and a divider there would cut the group apart
+                        // and leave the total looking like the next file's first
+                        // row.
+                        showDivider: index < list.count - 1
+                                     && root.subtotals[index] === null
+                    }
+
+                    FileSum {
+                        Layout.fillWidth: true
+                        visible: root.subtotals[index] !== null
+                                 && root.subtotals[index] !== undefined
+                        total: root.subtotals[index] !== undefined
+                               ? root.subtotals[index]
+                               : null
+                    }
                 }
             }
 

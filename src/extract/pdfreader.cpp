@@ -374,6 +374,8 @@ bool read(const QString &path, const ReadOptions &options, Document *document)
             return false;
         }
 
+        document->pageCount = pageCount;
+
         const int limit = options.maxPages > 0 ? options.maxPages : pageCount;
         const int pagesToRead = std::clamp(limit, 1, pageCount);
         document->notes.append(

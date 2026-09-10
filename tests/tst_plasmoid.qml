@@ -24,6 +24,19 @@ Item {
         harness.failures += 1;
     }
 
+    /// One reply object as the CLI writes it, for the subtotal cases.
+    function bill(path, page, pageCount, amount) {
+        return {
+            path: path,
+            file: path,
+            bill: page,
+            bill_count: pageCount,
+            status: "ok",
+            gross_total: amount,
+            currency: "EUR"
+        };
+    }
+
     Component.onCompleted: {
         // ---------------------------------------------------------- quoting
         check("plain path", Logic.quote("/tmp/a.pdf"), "'/tmp/a.pdf'");
@@ -86,6 +99,91 @@ Item {
         check("second of three",
               Logic.describePlace({ file: "a.pdf", bill: 2, bill_count: 3 }),
               "a.pdf, S. 2");
+
+        // --------------------------------------------------------- subtotals
+        // de_DE is pinned rather than taken from the environment, so the
+        // separators in these strings are the same wherever the suite runs.
+        const german = Qt.locale("de_DE");
+
+        const tanken = [
+            bill("tanken.pdf", 1, 3, 65.50),
+            bill("tanken.pdf", 2, 3, 90.91),
+            bill("tanken.pdf", 3, 3, 21.35)
+        ];
+        const tankenSums = Logic.subtotalsFor(tanken, german);
+        check("a total only at the last bill of the file",
+              [tankenSums[0], tankenSums[1], tankenSums[2] !== null], [null, null, true]);
+        check("the amounts add up",
+              tankenSums[2].money, "177,76 EUR");
+        check("the file's own page count is the coverage",
+              [tankenSums[2].counted, tankenSums[2].expected], [3, 3]);
+        check("a full sum is complete", tankenSums[2].complete, true);
+
+        // Two files in one list, each with its own total.
+        const both = Logic.subtotalsFor([
+            bill("oebb.pdf", 1, 1, 80.64),
+            bill("eintritte.pdf", 1, 2, 22.40),
+            bill("eintritte.pdf", 2, 2, 41.60)
+        ], german);
+        check("a one bill file gets no total row",
+              [both[0], both[1]], [null, null]);
+        check("the second file is totalled",
+              both[2].money, "64,00 EUR");
+
+        // The history limit can cut a file in half. The sum then has to say what
+        // it covers instead of looking like a full one.
+        const cut = Logic.subtotalsFor([
+            bill("tanken.pdf", 1, 3, 65.50),
+            bill("tanken.pdf", 2, 3, 90.91)
+        ], german);
+        check("a cut file is not complete", cut[1].complete, false);
+        check("a cut file reports its coverage",
+              [cut[1].counted, cut[1].expected, cut[1].money], [2, 3, "156,41 EUR"]);
+
+        const broken = Logic.subtotalsFor([
+            bill("mixed.pdf", 1, 3, 10.00),
+            { path: "mixed.pdf", file: "mixed.pdf", bill: 2, bill_count: 3, status: "error" },
+            bill("mixed.pdf", 3, 3, 5.50)
+        ], german);
+        check("a failed bill is counted, not summed",
+              [broken[2].counted, broken[2].failed, broken[2].complete], [2, 1, false]);
+        check("the sum skips the bill it could not read",
+              broken[2].money, "15,50 EUR");
+
+        // Cents, not floats: 0.1 + 0.2 is 0.30000000000000004 in binary.
+        const thirds = Logic.subtotalsFor([
+            bill("klein.pdf", 1, 2, 0.10),
+            bill("klein.pdf", 2, 2, 0.20)
+        ], german);
+        check("cents stay exact", thirds[1].money, "0,30 EUR");
+
+        const mixedCurrency = Logic.subtotalsFor([
+            { path: "urlaub.pdf", file: "urlaub.pdf", bill: 1, bill_count: 2,
+              status: "ok", gross_total: 10, currency: "EUR" },
+            { path: "urlaub.pdf", file: "urlaub.pdf", bill: 2, bill_count: 2,
+              status: "ok", gross_total: 5, currency: "USD" }
+        ], german);
+        check("currencies are never added together",
+              mixedCurrency[1].money, "10,00 EUR + 5,00 USD");
+
+        const noAmount = Logic.subtotalsFor([
+            { path: "leer.pdf", file: "leer.pdf", bill: 1, bill_count: 2, status: "ok" },
+            { path: "leer.pdf", file: "leer.pdf", bill: 2, bill_count: 2, status: "ok" }
+        ], german);
+        check("a sum with nothing in it is not complete", noAmount[1].complete, false);
+        check("a sum with nothing in it is empty", noAmount[1].money, "");
+
+        check("no bills is no marks", Logic.subtotalsFor([], german).length, 0);
+
+        // A run is broken by the file, not by the bill number: the same name on
+        // page 1 again is a new drop of the same file.
+        const twice = Logic.subtotalsFor([
+            bill("a.pdf", 1, 1, 1.00),
+            bill("b.pdf", 1, 1, 2.00),
+            bill("a.pdf", 1, 1, 3.00)
+        ], german);
+        check("the same file twice is two runs",
+              [twice[0], twice[1], twice[2]], [null, null, null]);
 
         console.log(harness.failures === 0 ? "ALL PASSED"
                                            : (harness.failures + " CHECK(S) FAILED"));
