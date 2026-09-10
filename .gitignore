@@ -1,0 +1,55 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+*.o
+*.so
+*.a
+invoicedrop
+/InvoiceDrop
+
+# CMake / Ninja
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+Makefile
+build.ninja
+.ninja_deps
+.ninja_log
+compile_commands.json
+
+# Qt / KDE
+*.moc
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+.autom4te.cache/
+
+# Editor / IDE
+# Only the shared task, debug and settings files are tracked.
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/c_cpp_properties.json
+.idea/
+*.kdev4
+*.kdev4.lock
+.KDevelop
+*.swp
+*.swo
+*~
+.clangd/
+
+# Language tooling
+.cache/
+compile_flags.txt
+
+# Runtime artefacts kept for manual inspection
+*.db
+*.db-journal
+*.log
+tests/testdata/generated/
+/out/

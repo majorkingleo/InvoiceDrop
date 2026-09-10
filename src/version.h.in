@@ -1,0 +1,4 @@
+#pragma once
+
+#define INVOICEDROP_VERSION "@PROJECT_VERSION@"
+#define INVOICEDROP_NAME "@PROJECT_NAME@"

@@ -1,0 +1,32 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++20
+ColumnLimit: 100
+IndentWidth: 4
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AlwaysBreakTemplateDeclarations: Yes
+BreakBeforeBraces: Attach
+ConstructorInitializerIndentWidth: 4
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^"'
+    Priority: 0
+  - Regex: '^<mupdf/'
+    Priority: 2
+  - Regex: '^<leptonica/'
+    Priority: 2
+  - Regex: '^<tesseract/'
+    Priority: 2
+  - Regex: '^<Q'
+    Priority: 3
+  - Regex: '.*'
+    Priority: 4
+PointerAlignment: Left
+SortIncludes: CaseSensitive
+SpaceAfterCStyleCast: false
+Standard: c++20
+TabWidth: 4
+UseTab: Never

@@ -1,0 +1,314 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        // ---------------------------------------------------------- configure
+        {
+            "label": "CMake: configure (Debug)",
+            "detail": "Configure the build directory with Ninja and the Debug build type.",
+            "type": "shell",
+            "command": "cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true,
+                "group": "configure"
+            }
+        },
+        {
+            "label": "CMake: configure (pick build type)",
+            "detail": "Configure the build directory with a build type of your choice.",
+            "type": "shell",
+            "command": "cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=${input:buildType}",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true,
+                "group": "configure"
+            }
+        },
+        // -------------------------------------------------------------- build
+        {
+            "label": "CMake: build (Debug)",
+            "detail": "Build into ./build. This is the default build task, bound to Ctrl+Shift+B.",
+            "type": "shell",
+            "command": "cmake --build build",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "CMake: configure (Debug)",
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared",
+                "clear": true,
+                "group": "build"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "CMake: build (verbose)",
+            "detail": "Same build, but every compiler command line is printed.",
+            "type": "shell",
+            "command": "cmake --build build --verbose",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "CMake: configure (Debug)",
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true,
+                "group": "build"
+            }
+        },
+        {
+            "label": "CMake: build (Release)",
+            "detail": "Separate build directory so Debug and Release can coexist.",
+            "type": "shell",
+            "command": "cmake -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build-release",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared",
+                "clear": true,
+                "group": "build"
+            },
+            "group": "build"
+        },
+        {
+            "label": "CMake: rebuild from scratch",
+            "detail": "Wipes ./build and configures and builds again. Use when CMake cache is stale.",
+            "type": "shell",
+            "command": "rm -rf build && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug && cmake --build build",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true,
+                "group": "build"
+            }
+        },
+        {
+            "label": "CMake: clean",
+            "detail": "Removes build artefacts, keeps the configuration.",
+            "type": "shell",
+            "command": "cmake --build build --target clean",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            }
+        },
+        // ---------------------------------------------------------------- run
+        {
+            "label": "Run: version",
+            "detail": "Smoke test that the binary exists and links.",
+            "type": "shell",
+            "command": "${workspaceFolder}/build/src/invoicedrop --version",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "CMake: build (Debug)",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "group": "run"
+            }
+        },
+        {
+            "label": "Run: extract text from a file",
+            "detail": "Phase 1 interface: print what the extractor found, no model involved.",
+            "type": "shell",
+            "command": "${workspaceFolder}/build/src/invoicedrop --extract-only '${input:invoiceFile}'",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "CMake: build (Debug)",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "group": "run"
+            }
+        },
+        {
+            "label": "Run: extract and dump page images",
+            "detail": "Writes the rasterised pages as JPEG so the raster, downscale and colour order can be checked by eye.",
+            "type": "shell",
+            "command": "mkdir -p '${input:dumpDir}' && ${workspaceFolder}/build/src/invoicedrop --extract-only --dump-images '${input:dumpDir}' '${input:invoiceFile}'",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "CMake: build (Debug)",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "group": "run"
+            }
+        },
+        {
+            "label": "Run: extract as JSON",
+            "detail": "Same as above but one JSON object on stdout, for piping into jq.",
+            "type": "shell",
+            "command": "${workspaceFolder}/build/src/invoicedrop --extract-only --json '${input:invoiceFile}'",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "CMake: build (Debug)",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "group": "run"
+            }
+        },
+        // --------------------------------------------------------------- test
+        {
+            "label": "Test: run (ctest)",
+            "detail": "Runs the QTest binaries registered with CTest.",
+            "type": "shell",
+            "command": "ctest --test-dir build --output-on-failure",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true,
+                "group": "test"
+            },
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Test: build and run",
+            "detail": "Full loop: configure, build, then run the tests.",
+            "type": "shell",
+            "command": "ctest --test-dir build --output-on-failure",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "CMake: build (Debug)",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true,
+                "group": "test"
+            },
+            "group": "test"
+        },
+        {
+            "label": "Test: list",
+            "detail": "Shows which tests CTest discovered.",
+            "type": "shell",
+            "command": "ctest --test-dir build --show-only",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true,
+                "group": "test"
+            }
+        },
+        // ------------------------------------------------------------- checks
+        {
+            "label": "Check: dependencies",
+            "detail": "Prints the pkg-config versions the build relies on.",
+            "type": "shell",
+            "command": "pkg-config --modversion mupdf lept tesseract; tesseract --list-langs",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            }
+        },
+        {
+            "label": "Check: clang-format (dry run)",
+            "detail": "Lists files that do not match .clang-format. Needs clang installed.",
+            "type": "shell",
+            "command": "clang-format --dry-run --Werror (find src tests -name '*.cpp' -o -name '*.h')",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            }
+        }
+    ],
+    "inputs": [
+        {
+            "id": "invoiceFile",
+            "type": "promptString",
+            "description": "Invoice to read (PDF, JPEG, PNG)",
+            "default": "${env:HOME}/Rechnungen/rechnung.pdf"
+        },
+        {
+            "id": "dumpDir",
+            "type": "promptString",
+            "description": "Directory for the dumped page images",
+            "default": "/tmp/invoicedrop-pages"
+        },
+        {
+            "id": "buildType",
+            "type": "pickString",
+            "description": "CMake build type",
+            "options": [
+                "Debug",
+                "Release",
+                "RelWithDebInfo",
+                "MinSizeRel"
+            ],
+            "default": "Debug"
+        }
+    ]
+}
