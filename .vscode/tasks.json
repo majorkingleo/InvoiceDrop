@@ -253,6 +253,58 @@
                 "group": "test"
             }
         },
+        {
+            "label": "Test: run (verbose)",
+            "detail": "Same run, but the qInfo lines are shown. That is where the per-document timings, character counts and page counts appear.",
+            "type": "shell",
+            "command": "ctest --test-dir build -V --output-on-failure",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "group": "test"
+            },
+            "group": "test"
+        },
+        {
+            "label": "Test: run one case",
+            "detail": "Runs a single test slot of tst_documentreader, for example testDataIsRead or testDataIsRead:'Rechnung 2.jpg'.",
+            "type": "shell",
+            "command": "${workspaceFolder}/build/tests/tst_documentreader '${input:testCase}'",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "CMake: build (Debug)",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "group": "test"
+            },
+            "group": "test"
+        },
+        {
+            "label": "Test: rerun failed",
+            "detail": "Re-runs only the tests that failed in the previous run.",
+            "type": "shell",
+            "command": "ctest --test-dir build --rerun-failed --output-on-failure",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true,
+                "group": "test"
+            },
+            "group": "test"
+        },
         // ------------------------------------------------------------- checks
         {
             "label": "Check: dependencies",
@@ -309,6 +361,12 @@
                 "MinSizeRel"
             ],
             "default": "Debug"
+        },
+        {
+            "id": "testCase",
+            "type": "promptString",
+            "description": "Test slot to run (function name, optionally with a data row in single quotes)",
+            "default": "testDataIsRead"
         }
     ]
 }

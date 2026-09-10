@@ -121,9 +121,14 @@ Routing inside `read()`:
 
 | Input | Route |
 |-------|-------|
-| PDF, text layer ≥ 120 chars/page | MuPDF `fz_stext_page` text, no raster |
+| PDF, text layer ≥ 120 chars/page | text layer, rebuilt into visual rows by y position, no raster |
 | PDF, no text layer | MuPDF renders the leading pages, Leptonica downscales, Tesseract OCRs when `--ocr` is set |
 | JPEG/PNG/TIFF/WebP/BMP | Leptonica `pixRead`, EXIF orientation, downscale, OCR only with `--ocr` |
+
+The text layer is not emitted in content-stream order. `fz_print_stext_page_as_text`
+returns blocks as they were drawn, which on a two-column SAP form puts every label
+before every value and leaves `Datum:` a page away from `20250430`. Lines are
+grouped by vertical position and sorted by x, so a label stays next to its value.
 
 Two resolution rules protect legibility. A narrow page, such as an 82 mm receipt
 roll, is rendered at a higher dpi until its short edge reaches `minShortEdge`,
@@ -152,14 +157,21 @@ scripting and for the plasmoid.
 |------|--------|
 | `--json` | machine readable output |
 | `--model NAME` | override the model |
-| `--ollama-url URL` | override the endpoint |
-| `--lang de` | language for free text fields |
+| `--ollama-url URL` | override the endpoint, defaults to `$OLLAMA_HOST` |
+| `--timeout SEC` | how long to wait for one answer |
+| `--think` | let a reasoning model deliberate first, off because it costs 10x |
+| `--lang de` | language the model writes free text fields in |
 | `--pages N` | page cap for PDFs |
 | `--dpi N` | raster resolution |
-| `--extract-only` | print extracted text, skip the model (phases 1 debugging) |
+| `--extract-only` | print extracted text, skip the model |
+| `--ocr` | run Tesseract over the raster, off because it loses on photos |
+| `--ocr-lang deu+eng` | Tesseract language packs for `--ocr` |
 | `--no-cache` | re-analyse even if the hash is known |
 | `--move` | archive the original after success |
-| `-v` | verbose logging on stderr |
+| `--verbose` | extraction notes and timings on stderr |
+
+`-v` is not free: `QCommandLineParser` claims it for `--version`, so the verbose
+flag is long form only.
 
 Subcommands arrive with their phases: `history`, `daemon`, `doctor`. The
 implementation order is in `docs/plan.md`.
@@ -189,11 +201,12 @@ implementation order is in `docs/plan.md`.
 ```http
 POST /api/chat
 {
-  "model": "qwen2.5vl:7b",
+  "model": "gemma4:latest",
   "stream": false,
+  "think": false,
   "keep_alive": "30m",
   "format": { …invoice JSON schema… },
-  "options": { "temperature": 0, "num_ctx": 8192 },
+  "options": { "temperature": 0 },
   "messages": [
     { "role": "system", "content": "Extract invoice fields. Reply with JSON only…" },
     { "role": "user",   "content": "…extracted text…",
@@ -204,16 +217,32 @@ POST /api/chat
 
 Notes on the transport:
 
-* `QNetworkAccessManager` only. One `QNetworkReply` in flight at a time; the
-  daemon keeps a FIFO queue, because a single GPU cannot serve parallel
-  generations usefully.
-* `format` carries the JSON schema, which constrains decoding for models that
-  support it. When a model ignores it, the daemon reparses the text, and on a
-  parse failure retries once with the error appended to the prompt.
-* `keep_alive` keeps the weights resident, so the first drop after a pause is not
-  a cold start. Timeout is configurable, default 300 s.
-* `/api/tags` is polled on startup and on `doctor` to verify the model exists and
-  to report a missing pull.
+* `QNetworkAccessManager`, synchronously. One reply in flight, because the CLI
+  analyses one file and exits. Phase 4 wraps the same request builder in async
+  calls for the daemon.
+* `think: false`. Measured on a receipt: 10.2 s with a reasoning trace, 1.0 s
+  without, identical answer. Reading an invoice is not a task that benefits from
+  deliberation.
+* `format` carries the JSON schema, which constrains decoding. A reply that
+  parses but lacks the vendor or the total is retried exactly once with the
+  complaint appended; a third attempt costs seconds and rarely helps.
+* `keep_alive` keeps the weights resident, so the second document in a run is not
+  a cold start.
+* `/api/tags` is checked once before the first file, so a missing model produces
+  one actionable line instead of the same failure per file.
+
+### What the model is not asked to do
+
+The date is read out of the text by the CLI when the model omits it. Given the
+same text and `temperature: 0`, the model returns the issue date in some runs and
+drops it in others; a date is a regular expression, not a judgement call. The
+fallback only accepts a date on a line that carries a date label, because the
+earliest date on a document is often a service period.
+
+When the raster is too coarse to carry the text the model claims to have read —
+below 400 px on the short edge, with no text layer — the result is marked with
+`quality_warning`. Measured: at 174 px every model invents a vendor, a date and a
+total, and one of them invented a currency that is not on the paper.
 
 ## Input handling and the PDF question
 
@@ -233,24 +262,28 @@ the faster design: a digital invoice with a text layer never touches the GPU.
 
 ## Model choice
 
-Default: **`qwen2.5vl:7b`** (Qwen2.5-VL, Q4_K_M, ~6 GB VRAM).
+Default: **`gemma4:latest`**, and it was chosen by measurement, not by reputation.
 
 * Reads images directly, so scans, photos and rasterised PDF pages all work
   without a separate OCR model.
-* Strong on dense tables and small print, which is what invoices are.
-* Solid German and English, plus most European invoice layouts.
-* Ships with Ollama, so `ollama pull qwen2.5vl:7b` is the whole setup.
+* Over the twelve documents in `tests/testdata/` it needed 27.8 s and made no
+  mistakes that the input allowed. `minicpm-v:8b` needed 175.4 s on the same set,
+  failed outright on one document — an unterminated JSON reply after 118 s — and
+  invented two totals, including one on a receipt `gemma4` read down to the cent.
+* `ollama pull gemma4:latest` is the whole setup.
 
-Alternatives, same client code, config-only change:
+Alternatives, same client code, `--model` only:
 
 | Model | When |
 |-------|------|
-| `qwen2.5vl:3b` | ≤6 GB VRAM, or CPU-only; noticeably weaker on tables |
-| `qwen2.5vl:32b` | ≥24 GB VRAM, best accuracy on messy scans |
-| `gemma3:12b` | strong multilingual text, weaker layout reasoning |
-| `minicpm-v:8b` | good OCR, small footprint |
-| `llama3.2-vision:11b` | alternative, weaker German |
+| `minicpm-v:8b` | measured in phase 2 and rejected: six times slower, less accurate |
+| `qwen3.8:27b` | vision capable, more headroom if smaller models stall |
+| `gemma4:26b` | the larger sibling, for documents the default misreads |
 | `qwen2.5:7b-instruct` | text-layer fast path only, no images |
+
+Any model that reports the `vision` capability in `/api/show` works. Check with
+`invoicedrop doctor` once that subcommand exists; until then,
+`curl -s localhost:11434/api/show -d '{"model":"NAME"}'` lists the capabilities.
 
 The model is a settings value in both `invoicedropd` (KConfig) and the plasmoid
 configuration dialog; they write the same key.

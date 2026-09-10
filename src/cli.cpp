@@ -1,6 +1,8 @@
 #include "cli.h"
 
 #include "extract/documentreader.h"
+#include "invoice.h"
+#include "ollama.h"
 
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -11,7 +13,11 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocale>
 #include <QTextStream>
+
+#include <algorithm>
+#include <limits>
 
 namespace InvoiceDrop {
 namespace {
@@ -39,6 +45,46 @@ QString indentNotes(const QStringList &notes)
     if (notes.isEmpty())
         return QStringLiteral("(none)");
     return notes.join(QStringLiteral("\n             "));
+}
+
+/// True when the raster is too coarse to carry the text the model claims to
+/// have read.
+///
+/// Measured: a 174 px wide receipt photo makes every model invent a vendor, a
+/// date and a total, complete with a currency that is not on the paper. Numbers
+/// like that are worse than no numbers, so they get flagged rather than printed
+/// as fact.
+QString qualityWarning(const Extract::Document &document)
+{
+    if (document.hasTextLayer || document.pages.isEmpty())
+        return {};
+
+    int shortest = std::numeric_limits<int>::max();
+    for (const Extract::PageImage &page : document.pages)
+        shortest = qMin(shortest, qMin(page.width, page.height));
+
+    constexpr int kLegibleShortEdge = 400;
+    if (shortest == std::numeric_limits<int>::max() || shortest >= kLegibleShortEdge)
+        return {};
+
+    return QStringLiteral("the source is only %1 px across, so the model had to guess; "
+                          "treat the values as unverified")
+        .arg(shortest);
+}
+
+void printAnalysisLine(const QString &path, const Invoice &invoice)
+{
+    const QString amount = invoice.grossTotal.has_value()
+        ? QLocale::system().toString(*invoice.grossTotal, 'f', 2) + QLatin1Char(' ')
+            + invoice.currency
+        : QStringLiteral("-");
+
+    const QString vendor = invoice.vendor.isEmpty() ? QStringLiteral("-") : invoice.vendor;
+    const QString date = invoice.date.isEmpty() ? QStringLiteral("-") : invoice.date;
+
+    out() << QFileInfo(path).fileName() << "  " << vendor << "  " << date << "  " << amount
+          << Qt::endl;
+    out().flush();
 }
 
 void printHuman(const Extract::Document &document, const Extract::ReadOptions &options, bool withText)
@@ -71,16 +117,22 @@ void printHuman(const Extract::Document &document, const Extract::ReadOptions &o
     stream.flush();
 }
 
-QJsonObject toJson(const Extract::Document &document, bool withText)
+QJsonObject toJson(const Extract::Document &document,
+                   const Invoice *invoice,
+                   bool withText,
+                   const QString &failure,
+                   const QString &warning)
 {
     QJsonObject object;
     object.insert(QStringLiteral("file"), QFileInfo(document.path).fileName());
     object.insert(QStringLiteral("path"), document.path);
     object.insert(QStringLiteral("kind"), Extract::kindName(document.kind));
-    object.insert(QStringLiteral("status"), document.ok() ? QStringLiteral("ok")
-                                                          : QStringLiteral("error"));
-    if (!document.error.isEmpty())
-        object.insert(QStringLiteral("error"), document.error);
+    object.insert(QStringLiteral("status"), failure.isEmpty() ? QStringLiteral("ok")
+                                                               : QStringLiteral("error"));
+    if (!failure.isEmpty())
+        object.insert(QStringLiteral("error"), failure);
+    if (!warning.isEmpty())
+        object.insert(QStringLiteral("quality_warning"), warning);
 
     object.insert(QStringLiteral("has_text_layer"), document.hasTextLayer);
     object.insert(QStringLiteral("page_count"), document.pages.size());
@@ -94,6 +146,13 @@ QJsonObject toJson(const Extract::Document &document, bool withText)
 
     if (withText)
         object.insert(QStringLiteral("text"), document.text);
+
+    // Flat, so `jq '.vendor, .gross_total'` works as documented.
+    if (invoice) {
+        const QJsonObject fields = invoice->toJson();
+        for (auto entry = fields.constBegin(); entry != fields.constEnd(); ++entry)
+            object.insert(entry.key(), entry.value());
+    }
 
     return object;
 }
@@ -152,9 +211,33 @@ int runCli(const QStringList &arguments)
                                       QStringLiteral("Downscale images so the long edge is at most this "
                                                      "many pixels."),
                                       QStringLiteral("px"), QStringLiteral("1600"));
-    const QCommandLineOption languages(QStringLiteral("lang"),
-                                       QStringLiteral("Tesseract language pack, for example deu+eng."),
-                                       QStringLiteral("langs"), QStringLiteral("deu+eng"));
+    const QCommandLineOption ocrLanguages(
+        QStringLiteral("ocr-lang"),
+        QStringLiteral("Tesseract language pack for --ocr, for example deu+eng."),
+        QStringLiteral("langs"), QStringLiteral("deu+eng"));
+    const QCommandLineOption language(
+        QStringLiteral("lang"),
+        QStringLiteral("Language the model writes free text fields in."),
+        QStringLiteral("code"), QStringLiteral("de"));
+    const QCommandLineOption model(
+        QStringLiteral("model"),
+        QStringLiteral("Ollama model. Must report the vision capability for scans and photos."),
+        QStringLiteral("name"), QString::fromUtf8(kDefaultModel));
+    const QCommandLineOption ollamaUrl(
+        QStringLiteral("ollama-url"),
+        QStringLiteral("Ollama base URL. Defaults to $OLLAMA_HOST or 127.0.0.1:11434."),
+        QStringLiteral("url"));
+    const QCommandLineOption timeout(
+        QStringLiteral("timeout"),
+        QStringLiteral("Seconds to wait for one answer from the model."),
+        QStringLiteral("seconds"), QStringLiteral("300"));
+    const QCommandLineOption think(
+        QStringLiteral("think"),
+        QStringLiteral("Let a reasoning model think before answering. Slower, and no more "
+                       "accurate on invoices: measured 10.2 s against 1.0 s."));
+    const QCommandLineOption verboseOption(
+        QStringLiteral("verbose"),
+        QStringLiteral("Print extraction notes and timings on stderr."));
     const QCommandLineOption ocrShortEdge(
         QStringLiteral("ocr-short-edge"),
         QStringLiteral("Short edge OCR scales to before recognising. Tiny scans are magnified."),
@@ -181,7 +264,13 @@ int runCli(const QStringList &arguments)
     parser.addOption(dpi);
     parser.addOption(pages);
     parser.addOption(longEdge);
-    parser.addOption(languages);
+    parser.addOption(ocrLanguages);
+    parser.addOption(language);
+    parser.addOption(model);
+    parser.addOption(ollamaUrl);
+    parser.addOption(timeout);
+    parser.addOption(think);
+    parser.addOption(verboseOption);
     parser.addOption(ocrShortEdge);
     parser.addOption(psm);
     parser.addOption(noNormalise);
@@ -218,7 +307,7 @@ int runCli(const QStringList &arguments)
     options.dpi = qMax(30, parser.value(dpi).toInt());
     options.maxPages = qMax(1, parser.value(pages).toInt());
     options.longEdge = qMax(200, parser.value(longEdge).toInt());
-    options.ocr.languages = parser.value(languages);
+    options.ocr.languages = parser.value(ocrLanguages);
     options.ocr.enabled = parser.isSet(ocr);
     options.ocr.targetShortEdge = parser.value(ocrShortEdge).toInt();
     options.ocr.pageSegMode = qBound(0, parser.value(psm).toInt(), 13);
@@ -231,14 +320,42 @@ int runCli(const QStringList &arguments)
 
     const bool withText = parser.isSet(extractOnly);
     const bool asJson = parser.isSet(json);
+    const bool verbose = parser.isSet(verboseOption);
+    const bool extractOnlyMode = parser.isSet(extractOnly);
 
-    // Phase 1 only extracts. Say so once, on stderr, so the stdout stream stays
-    // clean for piping.
-    if (!withText && !asJson) {
-        err() << "note: model analysis is not wired up yet, showing the extraction result "
-                 "(use --json for machine readable output)"
-              << Qt::endl;
-        err().flush();
+    OllamaOptions ollamaOptions;
+    if (parser.isSet(ollamaUrl))
+        ollamaOptions.url = parser.value(ollamaUrl);
+    ollamaOptions.model = parser.value(model);
+    ollamaOptions.language = parser.value(language);
+    ollamaOptions.think = parser.isSet(think);
+    ollamaOptions.timeoutMs = qMax(1, parser.value(timeout).toInt()) * 1000;
+
+    OllamaClient client(ollamaOptions);
+
+    // One check up front beats the same failure repeated per file, and it lets
+    // the message name the exact command that fixes it.
+    if (!extractOnlyMode) {
+        QString probeError;
+        const QStringList installed = client.installedModels(&probeError);
+        if (!probeError.isEmpty()) {
+            err() << probeError << Qt::endl;
+            err().flush();
+            return kExitFailure;
+        }
+
+        const QString wanted = ollamaOptions.model;
+        const bool found = std::any_of(installed.cbegin(), installed.cend(), [&wanted](const QString &name) {
+            return name == wanted
+                || name.section(QLatin1Char(':'), 0, 0) == wanted.section(QLatin1Char(':'), 0, 0);
+        });
+        if (!found) {
+            err() << "model '" << wanted << "' is not installed - run: ollama pull " << wanted
+                  << Qt::endl;
+            err() << "installed: " << installed.join(QStringLiteral(", ")) << Qt::endl;
+            err().flush();
+            return kExitFailure;
+        }
     }
 
     QJsonArray results;
@@ -247,22 +364,72 @@ int runCli(const QStringList &arguments)
     for (const QString &file : files) {
         const Extract::Document document = Extract::readDocument(file, options);
 
-        if (!asJson)
-            printHuman(document, options, withText);
+        // An extraction failure is fatal for the file: there is nothing left to
+        // send to the model.
+        if (!document.ok()) {
+            allOk = false;
+            if (asJson)
+                results.append(toJson(document, nullptr, withText, document.error, QString()));
+            else
+                err() << QFileInfo(file).fileName() << ": " << document.error << Qt::endl;
+            err().flush();
+            continue;
+        }
 
         if (parser.isSet(dumpImages) && !document.pages.isEmpty()) {
             QStringList problems;
             dumpPages(document, parser.value(dumpImages), &problems);
-            for (const QString &problem : problems) {
+            for (const QString &problem : problems)
                 err() << "warning: " << problem << Qt::endl;
-            }
             err().flush();
         }
 
-        if (!document.ok())
+        if (extractOnlyMode) {
+            if (asJson)
+                results.append(toJson(document, nullptr, withText, QString(), QString()));
+            else
+                printHuman(document, options, withText);
+            continue;
+        }
+
+        QList<QByteArray> pages;
+        pages.reserve(document.pages.size());
+        for (const Extract::PageImage &page : document.pages)
+            pages.append(page.jpeg);
+
+        Invoice invoice;
+        QString analysisError;
+        const bool analysed = client.analyse(document.text, pages, &invoice, &analysisError);
+        if (!analysed)
             allOk = false;
 
-        results.append(toJson(document, withText));
+        const QString warning = analysed ? qualityWarning(document) : QString();
+
+        if (verbose) {
+            err() << QFileInfo(file).fileName() << ": " << document.pages.size() << " page image(s)"
+                  << ", " << document.text.size() << " text chars"
+                  << ", extract " << document.elapsedMs << " ms"
+                  << ", model " << client.lastInferenceMs() << " ms" << Qt::endl;
+            for (const QString &note : document.notes)
+                err() << "  note: " << note << Qt::endl;
+            if (!analysisError.isEmpty())
+                err() << "  problem: " << analysisError << Qt::endl;
+            err().flush();
+        }
+
+        if (asJson) {
+            results.append(toJson(document, &invoice, withText, analysisError, warning));
+        } else {
+            printAnalysisLine(file, invoice);
+            if (!warning.isEmpty()) {
+                err() << QFileInfo(file).fileName() << ": warning: " << warning << Qt::endl;
+                err().flush();
+            }
+            if (!analysed) {
+                err() << QFileInfo(file).fileName() << ": " << analysisError << Qt::endl;
+                err().flush();
+            }
+        }
     }
 
     if (asJson) {

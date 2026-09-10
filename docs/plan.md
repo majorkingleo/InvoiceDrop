@@ -22,7 +22,7 @@ file watcher. Non-goals until phase 5: no QML at all.
 |-------|-------------|-----------|--------|
 | 0 | Skeleton that compiles, prints version | `invoicedrop --version` | **done** |
 | 1 | Extraction only, no AI | `invoicedrop --extract-only f.pdf` | **done** |
-| 2 | **MVP**: shop, date, sum from a real invoice | `InvoiceDrop bill1.pdf` | to do |
+| 2 | **MVP**: shop, date, sum from a real invoice | `InvoiceDrop bill1.pdf` | **done** |
 | 3 | SQLite store, hash cache, history | `invoicedrop history` | to do |
 | 4 | Daemon: inbox watch, DBus, notifications | `invoicedrop daemon` | to do |
 | 5 | Plasma widget | drag and drop in the panel | to do |
@@ -202,7 +202,7 @@ Steps:
    `YYYY-MM-DD`. Currency to an upper case ISO code. Strip a markdown fence
    before parsing.
 3. `ollama.cpp`: `POST /api/chat` with `stream:false`, `keep_alive:"30m"`,
-   `format` set to the schema object, `temperature:0`, `num_ctx:8192`, and one
+   `format` set to the schema object, `temperature: 0` and `think: false`, and one
    user message carrying both the extracted text and the page images as base64.
    One reply in flight at a time.
 4. Error mapping: `HTTP 404` becomes "model not pulled, run `ollama pull <model>`";
@@ -224,6 +224,44 @@ Done when five real invoices — at least one digital PDF, one scan, one photo �
 come back with the correct shop, date and sum, and the wall clock time per
 invoice is recorded. Compare against the text-layer fast path: if the digital PDF
 is not clearly faster, the routing in phase 1 is wrong.
+
+### What phase 2 actually found
+
+All twelve documents in `tests/testdata/` are read end to end. The reference run
+with `gemma4:latest` takes 27.8 s for the set, about 2 s per document.
+
+1. **`think: false` is worth 10x.** With a reasoning trace enabled, one receipt
+   took 10.2 s. With it disabled, 1.0 s, same answer, byte for byte. Reading an
+   invoice is not a task that benefits from deliberation, so the client sends
+   `think: false` and `--think` turns it back on.
+2. **The text layer came out in drawing order, not reading order.**
+   `fz_print_stext_page_as_text` emits blocks as they appear in the content
+   stream, so on a SAP invoice every label of a two-column form arrived before
+   every value: `Datum:` and `20250430` were a page apart in the output and no
+   date was ever reported. Lines are now grouped by their vertical position and
+   sorted by x, so a label sits next to its value. The same change made the IBAN
+   and the payment terms readable.
+3. **The model drops the date at random.** Same text, same prompt,
+   `temperature: 0`, and the model returns the issue date in some runs and omits
+   it in the next. Measured across repeated runs, not guessed. A date is a
+   regular expression rather than a judgement call, so when the model stays
+   silent the labelled date is read out of the text directly. Three consecutive
+   runs of the ÖBB invoice now all report `2025-04-30`.
+4. **`minicpm-v:8b` is not a candidate.** Same twelve documents, 175.4 s against
+   27.8 s, one hard failure where the JSON came back unterminated after 118 s,
+   and two invented totals. `gemma4:latest` reads the photographed Lagerhaus
+   receipt correctly down to the cent, including `18,48 EUR` and `2025-07-17`,
+   where `minicpm-v` returned nothing at all.
+5. **A 174 px scan makes every model lie.** `Rechnung 1 - gesamt.jpg` is 174 px
+   wide, roughly 3.6 px per character. Both models returned a confident vendor, a
+   date and a total, and both were wrong; one of them invented USD, which is not
+   on the paper. The CLI now flags any result whose raster is below 400 px on the
+   short edge with `quality_warning`, on stderr and in the JSON, instead of
+   presenting the numbers as fact.
+
+Known limits carried forward: the vendor name is sometimes a person rather than
+a shop, casing follows the paper (`hofer` stays `hofer`), and a document holding
+twenty-one receipts still yields one record for the first page only.
 
 ---
 
@@ -367,7 +405,7 @@ The CLI is the stable interface; the widget and the shell both consume it.
 | `--extract-only` | print extracted text, skip the model |
 | `--no-cache` | re-analyse even if the hash is known |
 | `--move` | archive the original after success |
-| `-v` | verbose logging on stderr |
+| `--verbose` | extraction notes and timings on stderr. `-v` belongs to `--version` |
 
 Subcommands: `daemon` (phase 4), `history` (phase 3), `doctor` (phase 6).
 
@@ -385,15 +423,18 @@ Phase 2 is done when all of the following hold:
 
 ## Open decisions
 
+* **Resolved in phase 2: `gemma4:latest` is the default model.** `minicpm-v:8b`
+  was measured against it and lost on accuracy, on stability and by a factor of
+  six on time. Any model that reports the `vision` capability works; the choice
+  is a `--model` flag, not a code change.
+* **Resolved in phase 2: reasoning is off.** `think: false` is the default.
 * **Resolved in phase 1: the Tesseract pre-pass is off by default.** It reads
   clean scans, but on every photographed receipt in the test set it produced
   confident garbage that would be fed to the model as evidence. `--ocr` opts in.
-  Revisit only with a real flatbed-scan set to measure against.
-* Whether to send extracted text *and* images when the text layer route did fire.
-  Sending both costs tokens but helps when a number is ambiguous. Measure in
-  phase 2, then fix the default.
-* **Multi-invoice documents.** A single PDF can hold 21 receipts. Phase 2 must
+* **Multi-invoice documents.** A single PDF can hold 21 receipts. Phase 3 must
   decide between per-page extraction, a page cap that reports truncation, or
   several records per file. Currently the cap truncates silently.
 * Page cap default of 4. Revisit once the collection files above are handled.
-* Model default `qwen2.5vl:7b`. Revisit once real invoices have been through it.
+* Whether to also send page images when the text layer route fired. The ÖBB
+  invoice is now read correctly from text alone, so the token cost is currently
+  not buying anything.

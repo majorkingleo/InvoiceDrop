@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------------
+# Document extraction: MuPDF, Leptonica, Tesseract. No Qt beyond Core, so it
+# stays independent of the network layer.
+# ---------------------------------------------------------------------------
+
 add_library(invoicedrop-extract STATIC
     extract/documentreader.cpp
     extract/imagereader.cpp
@@ -27,6 +32,32 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# Invoice model and the Ollama client.
+# ---------------------------------------------------------------------------
+
+add_library(invoicedrop-ai STATIC
+    invoice.cpp
+    ollama.cpp
+)
+
+target_link_libraries(invoicedrop-ai
+    PUBLIC
+        invoicedrop-extract
+        Qt6::Network
+)
+
+target_include_directories(invoicedrop-ai
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+if(INVOICEDROP_WERROR)
+    target_compile_options(invoicedrop-ai PRIVATE -Wall -Wextra -Werror)
+else()
+    target_compile_options(invoicedrop-ai PRIVATE -Wall -Wextra)
+endif()
+
+# ---------------------------------------------------------------------------
 
 configure_file(version.h.in version.h @ONLY)
 
@@ -35,7 +66,7 @@ add_executable(invoicedrop
     cli.cpp
 )
 
-target_link_libraries(invoicedrop PRIVATE invoicedrop-extract)
+target_link_libraries(invoicedrop PRIVATE invoicedrop-ai)
 
 target_include_directories(invoicedrop PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 

@@ -28,9 +28,10 @@ include(GNUInstallDirs)
 include(CTest)
 
 # ---------------------------------------------------------------------------
-# Qt: only Core for now. Network, Sql and DBus arrive in later phases.
+# Qt. Network arrives with the Ollama client. Sql and DBus follow in later
+# phases.
 # ---------------------------------------------------------------------------
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network)
 
 # ---------------------------------------------------------------------------
 # Document libraries. MuPDF renders and reads PDF text, Leptonica decodes

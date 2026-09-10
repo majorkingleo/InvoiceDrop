@@ -10,6 +10,7 @@
 
 #include <QFile>
 #include <QStringList>
+#include <QVector>
 
 #include <mupdf/fitz.h>
 
@@ -84,6 +85,98 @@ struct BufferGuard {
     fz_buffer *handle = nullptr;
 };
 
+/// One line of the text layer, with the box it occupies on the page.
+struct TextLine {
+    double left = 0;
+    double right = 0;
+    double centreY = 0;
+    double height = 0;
+    QString text;
+};
+
+/// Collects the text layer as visual lines rather than as content-stream order.
+///
+/// fz_print_stext_page_as_text emits blocks in the order they were drawn. On a
+/// SAP-generated invoice that puts every label of a two-column form before every
+/// value, so "Datum:" ends up far away from "20250430" and the model reports no
+/// date at all. Grouping lines by their vertical position and sorting by x puts
+/// the label back next to its value, which is the only thing that makes a field
+/// readable.
+QString layoutAwareText(fz_context *ctx, fz_stext_page *page)
+{
+    Q_UNUSED(ctx);
+
+    QVector<TextLine> lines;
+
+    for (fz_stext_block *block = page->first_block; block; block = block->next) {
+        if (block->type != FZ_STEXT_BLOCK_TEXT)
+            continue;
+        for (fz_stext_line *line = block->u.t.first_line; line; line = line->next) {
+            QString text;
+            for (fz_stext_char *character = line->first_char; character; character = character->next)
+                text.append(QChar(character->c));
+            text = text.trimmed();
+            if (text.isEmpty())
+                continue;
+
+            TextLine entry;
+            entry.left = line->bbox.x0;
+            entry.right = line->bbox.x1;
+            entry.centreY = (line->bbox.y0 + line->bbox.y1) / 2.0;
+            entry.height = qMax(1.0, static_cast<double>(line->bbox.y1 - line->bbox.y0));
+            entry.text = text;
+            lines.append(entry);
+        }
+    }
+
+    if (lines.isEmpty())
+        return {};
+
+    std::sort(lines.begin(), lines.end(), [](const TextLine &a, const TextLine &b) {
+        if (qAbs(a.centreY - b.centreY) > 1.0)
+            return a.centreY < b.centreY;
+        return a.left < b.left;
+    });
+
+    QString result;
+    double rowCentre = 0.0;
+    double rowHeight = 1.0;
+    double lastRight = 0.0;
+
+    for (int index = 0; index < lines.size(); ++index) {
+        const TextLine &line = lines.at(index);
+
+        if (index == 0) {
+            result += line.text;
+            rowCentre = line.centreY;
+            rowHeight = line.height;
+            lastRight = line.right;
+            continue;
+        }
+
+        // Lines share a row when their centres are close relative to the text
+        // height, so a taller heading does not swallow the next line.
+        const double tolerance = 0.6 * qMax(rowHeight, line.height);
+        if (qAbs(line.centreY - rowCentre) > tolerance) {
+            result += QLatin1Char('\n');
+            result += line.text;
+            rowCentre = line.centreY;
+            rowHeight = line.height;
+        } else {
+            const double gap = line.left - lastRight;
+            // A wide gap is a column boundary, and saying so helps the model
+            // more than a lone space does.
+            result += gap > 6.0 ? QStringLiteral("    ") : QStringLiteral(" ");
+            result += line.text;
+            rowHeight = qMax(rowHeight, line.height);
+        }
+
+        lastRight = line.right;
+    }
+
+    return result.trimmed();
+}
+
 struct OutputGuard {
     explicit OutputGuard(fz_context *context) : ctx(context) {}
     ~OutputGuard()
@@ -108,26 +201,7 @@ QString extractPageText(fz_context *ctx, fz_document *document, int index)
     if (!stext.handle)
         return {};
 
-    BufferGuard buffer(ctx);
-    buffer.handle = fz_new_buffer(ctx, 4096);
-    if (!buffer.handle)
-        return {};
-
-    OutputGuard output(ctx);
-    output.handle = fz_new_output_with_buffer(ctx, buffer.handle);
-    if (!output.handle)
-        return {};
-
-    fz_print_stext_page_as_text(ctx, output.handle, stext.handle);
-    fz_close_output(ctx, output.handle);
-
-    unsigned char *data = nullptr;
-    const size_t length = fz_buffer_storage(ctx, buffer.handle, &data);
-    if (!data || length == 0)
-        return {};
-
-    return QString::fromUtf8(reinterpret_cast<const char *>(data), static_cast<qsizetype>(length))
-        .trimmed();
+    return layoutAwareText(ctx, stext.handle);
 }
 
 /// Picks a zoom factor for one page.
