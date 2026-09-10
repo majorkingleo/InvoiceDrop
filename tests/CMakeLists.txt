@@ -42,6 +42,16 @@ set_tests_properties(bills PROPERTIES
     TIMEOUT 1800
 )
 
+qt_add_executable(tst_store tst_store.cpp)
+
+target_link_libraries(tst_store
+    PRIVATE
+        invoicedrop-ai
+        Qt6::Test
+)
+
+add_test(NAME store COMMAND tst_store)
+
 # Run from the project root so tests/testdata is reachable by relative path as
 # well as through QFINDTESTDATA.
 set_tests_properties(documentreader PROPERTIES

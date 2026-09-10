@@ -37,14 +37,18 @@ endif()
 
 add_library(invoicedrop-ai STATIC
     analysis.cpp
+    hash.cpp
     invoice.cpp
     ollama.cpp
+    paths.cpp
+    store.cpp
 )
 
 target_link_libraries(invoicedrop-ai
     PUBLIC
         invoicedrop-extract
         Qt6::Network
+        Qt6::Sql
 )
 
 target_include_directories(invoicedrop-ai

@@ -4,6 +4,8 @@
 #include "extract/documentreader.h"
 #include "invoice.h"
 #include "ollama.h"
+#include "paths.h"
+#include "store.h"
 
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -15,6 +17,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocale>
+#include <QStandardPaths>
 #include <QTextStream>
 
 #include <algorithm>
@@ -46,6 +49,92 @@ QString indentNotes(const QStringList &notes)
     if (notes.isEmpty())
         return QStringLiteral("(none)");
     return notes.join(QStringLiteral("\n             "));
+}
+
+/// Where processed originals go when --move is used.
+QString archiveDirectory()
+{
+    return Paths::archiveDir();
+}
+
+/// Moves a fully read original out of the way. Never overwrites: a second file
+/// with the same name gets a counter.
+QString archiveOriginal(const QString &path, QString *error)
+{
+    QDir archive(archiveDirectory());
+    if (!archive.exists() && !archive.mkpath(QStringLiteral("."))) {
+        *error = QStringLiteral("cannot create %1").arg(archive.absolutePath());
+        return {};
+    }
+
+    const QFileInfo info(path);
+    QString target = archive.filePath(info.fileName());
+    for (int counter = 1; QFile::exists(target); ++counter) {
+        target = archive.filePath(QStringLiteral("%1-%2.%3")
+                                      .arg(info.completeBaseName())
+                                      .arg(counter)
+                                      .arg(info.suffix()));
+    }
+
+    if (!QFile::rename(path, target)) {
+        *error = QStringLiteral("cannot move %1 to %2").arg(path, target);
+        return {};
+    }
+    return target;
+}
+
+/// `invoicedrop history`. Lists what is stored, newest first.
+int runHistory(Store &store, int limit, bool asJson)
+{
+    const QVector<StoredBill> bills = store.recent(qMax(1, limit));
+
+    if (asJson) {
+        for (const StoredBill &bill : bills) {
+            QJsonObject object;
+            object.insert(QStringLiteral("file"), bill.fileName);
+            object.insert(QStringLiteral("page"), bill.page);
+            object.insert(QStringLiteral("status"), bill.status);
+            object.insert(QStringLiteral("vendor"), bill.vendor);
+            object.insert(QStringLiteral("date"), bill.date);
+            object.insert(QStringLiteral("gross_total"),
+                          bill.grossTotal.has_value() ? QJsonValue(*bill.grossTotal)
+                                                      : QJsonValue(QJsonValue::Null));
+            object.insert(QStringLiteral("currency"), bill.currency);
+            object.insert(QStringLiteral("model"), bill.model);
+            object.insert(QStringLiteral("created_at"), bill.createdAt);
+
+            const QJsonDocument document(object);
+            out() << QString::fromUtf8(document.toJson(QJsonDocument::Compact)) << Qt::endl;
+        }
+        out().flush();
+        return kExitOk;
+    }
+
+    if (bills.isEmpty()) {
+        out() << "nothing stored yet in " << store.databasePath() << Qt::endl;
+        out().flush();
+        return kExitOk;
+    }
+
+    for (const StoredBill &bill : bills) {
+        const QString amount = bill.grossTotal.has_value()
+            ? QLocale::system().toString(*bill.grossTotal, 'f', 2) + QLatin1Char(' ')
+                + bill.currency
+            : QStringLiteral("-");
+
+        // The file name goes last: it is the field that varies most, so it is
+        // the one allowed to push a narrow terminal into wrapping. The page
+        // marker sits in front of it, where a wrap cannot orphan it.
+        out() << bill.createdAt.left(16).replace(QLatin1Char('T'), QLatin1Char(' ')) << "  "
+              << bill.vendor.left(20).leftJustified(20) << "  "
+              << bill.date.leftJustified(10, QLatin1Char(' '), true).left(10) << "  "
+              << amount.rightJustified(12) << "  p" << bill.page << ' ' << bill.fileName
+              << Qt::endl;
+    }
+    out() << bills.size() << " of " << store.billCount() << " stored bill(s), database "
+          << store.databasePath() << Qt::endl;
+    out().flush();
+    return kExitOk;
 }
 
 void printAnalysisLine(const QString &label, const Invoice &invoice)
@@ -146,6 +235,7 @@ QJsonObject billJson(const BillResult &bill)
         object.insert(QStringLiteral("quality_warning"), bill.qualityWarning);
 
     object.insert(QStringLiteral("has_text_layer"), bill.fromTextLayer);
+    object.insert(QStringLiteral("from_cache"), bill.fromCache);
     object.insert(QStringLiteral("extract_ms"), bill.extractMs);
     object.insert(QStringLiteral("inference_ms"), bill.inferMs);
 
@@ -244,6 +334,21 @@ int runCli(const QStringList &arguments)
     const QCommandLineOption verboseOption(
         QStringLiteral("verbose"),
         QStringLiteral("Print extraction notes and timings on stderr."));
+    const QCommandLineOption database(
+        QStringLiteral("db"),
+        QStringLiteral("Database file. Defaults to invoicedrop.db in the application data "
+                       "directory."),
+        QStringLiteral("path"));
+    const QCommandLineOption noCache(
+        QStringLiteral("no-cache"),
+        QStringLiteral("Read the document again even if its hash is already stored."));
+    const QCommandLineOption move(
+        QStringLiteral("move"),
+        QStringLiteral("Move the original into the archive folder once every bill was read."));
+    const QCommandLineOption limit(
+        QStringLiteral("limit"),
+        QStringLiteral("How many bills `history` lists."),
+        QStringLiteral("count"), QStringLiteral("20"));
     const QCommandLineOption ocrShortEdge(
         QStringLiteral("ocr-short-edge"),
         QStringLiteral("Short edge OCR scales to before recognising. Tiny scans are magnified."),
@@ -277,6 +382,10 @@ int runCli(const QStringList &arguments)
     parser.addOption(timeout);
     parser.addOption(think);
     parser.addOption(verboseOption);
+    parser.addOption(database);
+    parser.addOption(noCache);
+    parser.addOption(move);
+    parser.addOption(limit);
     parser.addOption(ocrShortEdge);
     parser.addOption(psm);
     parser.addOption(noNormalise);
@@ -303,6 +412,11 @@ int runCli(const QStringList &arguments)
         return kExitUsage;
     }
 
+    // `history` is the only subcommand so far. It is recognised as the first
+    // positional argument because everything else is a file to read.
+    const bool historyMode =
+        files.first() == QStringLiteral("history") && !parser.isSet(extractOnly);
+
     if (parser.isSet(textOnly) && parser.isSet(imagesOnly)) {
         err() << "--text-only and --images-only cannot be combined" << Qt::endl;
         err().flush();
@@ -328,6 +442,16 @@ int runCli(const QStringList &arguments)
     const bool asJson = parser.isSet(json);
     const bool verbose = parser.isSet(verboseOption);
     const bool extractOnlyMode = parser.isSet(extractOnly);
+
+    Store store(parser.isSet(database) ? parser.value(database) : Store::defaultPath());
+    if (!store.isOpen()) {
+        err() << "cannot open " << store.databasePath() << ": " << store.error() << Qt::endl;
+        err().flush();
+        return kExitFailure;
+    }
+
+    if (historyMode)
+        return runHistory(store, parser.value(limit).toInt(), asJson);
 
     OllamaOptions ollamaOptions;
     if (parser.isSet(ollamaUrl))
@@ -401,7 +525,27 @@ int runCli(const QStringList &arguments)
         }
 
         // One record per bill, and a bill is one page.
-        const QVector<BillResult> bills = analyseFile(file, options, client);
+        Store *cache = parser.isSet(noCache) ? nullptr : &store;
+        const QVector<BillResult> bills = analyseFile(file, options, client, cache);
+
+        if (parser.isSet(move)) {
+            bool everyBillRead = !bills.isEmpty();
+            for (const BillResult &bill : bills) {
+                if (!bill.ok)
+                    everyBillRead = false;
+            }
+
+            if (everyBillRead) {
+                QString moveError;
+                const QString target = archiveOriginal(file, &moveError);
+                if (!target.isEmpty()) {
+                    err() << QFileInfo(file).fileName() << ": moved to " << target << Qt::endl;
+                } else {
+                    err() << QFileInfo(file).fileName() << ": " << moveError << Qt::endl;
+                }
+                err().flush();
+            }
+        }
 
         for (const BillResult &bill : bills) {
             if (!bill.ok)
@@ -410,7 +554,9 @@ int runCli(const QStringList &arguments)
             if (verbose) {
                 err() << bill.label() << ": extract " << bill.extractMs << " ms"
                       << ", model " << bill.inferMs << " ms"
-                      << (bill.fromTextLayer ? ", text layer" : ", raster") << Qt::endl;
+                      << (bill.fromCache ? ", cached"
+                                         : (bill.fromTextLayer ? ", text layer" : ", raster"))
+                      << Qt::endl;
                 for (const QString &note : bill.notes)
                     err() << "  note: " << note << Qt::endl;
                 if (!bill.qualityWarning.isEmpty())

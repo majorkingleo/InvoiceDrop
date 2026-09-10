@@ -10,6 +10,8 @@
 
 namespace InvoiceDrop {
 
+class Store;
+
 /// One bill: the result of analysing one page.
 ///
 /// The unit of output is the page, not the file, because a file is not a bill.
@@ -30,6 +32,7 @@ struct BillResult {
     Invoice invoice;
 
     bool fromTextLayer = false;
+    bool fromCache = false;
     int rasterShortEdge = 0;
     qint64 extractMs = 0;
     qint64 inferMs = 0;
@@ -44,8 +47,13 @@ struct BillResult {
 ///
 /// The CLI, the tests and later the daemon all call this, so the pipeline exists
 /// in exactly one place and cannot drift between them.
+///
+/// When `cache` is given, a document whose hash and settings fingerprint are
+/// already stored is answered from SQLite without opening the file. Tests pass
+/// nothing, so they always exercise the real pipeline.
 QVector<BillResult> analyseFile(const QString &path,
                                 const Extract::ReadOptions &readOptions,
-                                OllamaClient &client);
+                                OllamaClient &client,
+                                Store *cache = nullptr);
 
 } // namespace InvoiceDrop

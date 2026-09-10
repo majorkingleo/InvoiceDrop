@@ -31,7 +31,7 @@ include(CTest)
 # Qt. Network arrives with the Ollama client. Sql and DBus follow in later
 # phases.
 # ---------------------------------------------------------------------------
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network Sql)
 
 # ---------------------------------------------------------------------------
 # Document libraries. MuPDF renders and reads PDF text, Leptonica decodes

@@ -166,15 +166,43 @@ scripting and for the plasmoid.
 | `--extract-only` | print extracted text, skip the model |
 | `--ocr` | run Tesseract over the raster, off because it loses on photos |
 | `--ocr-lang deu+eng` | Tesseract language packs for `--ocr` |
-| `--no-cache` | re-analyse even if the hash is known |
+| `--no-cache` | read the document again instead of using the store |
+| `--move` | move the original into the archive once every bill was read |
+| `--db PATH` | database file, defaults to `~/.local/share/invoicedrop/invoicedrop.db` |
+| `--limit N` | how many bills `history` lists |
 | `--move` | archive the original after success |
 | `--verbose` | extraction notes and timings on stderr |
 
 `-v` is not free: `QCommandLineParser` claims it for `--version`, so the verbose
 flag is long form only.
 
-Subcommands arrive with their phases: `history`, `daemon`, `doctor`. The
-implementation order is in `docs/plan.md`.
+Subcommands: `history` lists what is stored. `daemon` and `doctor` follow in
+phases 4 and 6. The implementation order is in `docs/plan.md`.
+
+## Store
+
+SQLite through `QtSql`, in `~/.local/share/invoicedrop/invoicedrop.db`.
+
+| Table | Key | Holds |
+|-------|-----|-------|
+| `documents` | `sha256` | path, file name, page count, the settings fingerprint, model, timestamp |
+| `bills` | `(sha256, page)` | one row per page: vendor, date, totals, the raw payload |
+
+Bills are keyed on the page because a file is not a bill. Deleting a document
+cascades to its bills.
+
+### The cache key is not just the hash
+
+The same file read with another model, another page limit or another dpi is a
+different question. `Store::fingerprint()` hashes the settings that change the
+answer — model, page limit, dpi, long edge, short edge floor, text layer
+threshold, OCR switch and OCR languages — and a cache hit requires the hash *and*
+the fingerprint to match. Without it, switching `--model` would serve the previous
+model's answers from disk and look like a regression in the new one.
+
+Lookup happens before the document is opened, because hashing a file is
+milliseconds while rasterising and inferring are seconds. A document row without
+bills is treated as a miss and read again, rather than reported as nothing.
 
 ## Data flow
 

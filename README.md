@@ -65,11 +65,14 @@ invoicedrop rechnung.pdf ~/scans/*.jpg
 
 ## The result line
 
-One line per file, so it composes with `xargs`, `find -exec` and shell loops:
+One line per bill, so it composes with `xargs`, `find -exec` and shell loops:
 
 ```
 <file>  <shop>  <date>  <sum> <currency>
 ```
+
+A file with more than one page is labelled `file.pdf:2`, because a file is not a
+bill. A two page scan produces two lines.
 
 * `<shop>` is the vendor as printed on the document, casing included. A receipt
   from `hofer` stays `hofer`.
@@ -87,7 +90,7 @@ swallows a warning.
 what makes `jq` behave the same interactively and in a loop:
 
 ```fish
-invoicedrop --json rechnung.pdf | jq '.vendor'
+invoicedrop --json rechnung.pdf | jq '.vendor, .gross_total'
 invoicedrop --json ~/Rechnungen/*.pdf | jq -r '.vendor'
 ```
 
@@ -95,12 +98,13 @@ invoicedrop --json ~/Rechnungen/*.pdf | jq -r '.vendor'
 {
   "file": "2025-08-oebb_9865091376.PDF",
   "path": "/home/u/Rechnungen/2025-08-oebb_9865091376.PDF",
-  "kind": "pdf",
+  "bill": 1,
+  "bill_count": 1,
   "status": "ok",
   "has_text_layer": true,
-  "page_count": 0,
-  "text_chars": 1265,
-  "elapsed_ms": 4,
+  "from_cache": false,
+  "extract_ms": 4,
+  "inference_ms": 1603,
   "notes": ["MuPDF: 1 page(s), reading 1", "text layer used, nothing rasterised"],
 
   "vendor": "ÖBB-Personenverkehr AG",
@@ -120,10 +124,11 @@ invoicedrop --json ~/Rechnungen/*.pdf | jq -r '.vendor'
 | Field | Meaning |
 |-------|---------|
 | `status` | `ok`, or `error` with `error` set to the reason |
-| `kind` | `pdf` or `image` |
-| `has_text_layer` | the PDF carried readable text and was not rasterised |
-| `page_count` | how many page images were sent to the model |
-| `text_chars` | characters of text sent along with the images |
+| `bill` | one based page number: a bill is a page, not a file |
+| `bill_count` | pages read from this file |
+| `has_text_layer` | the page text came from the PDF, not from OCR or an image |
+| `from_cache` | answered from the store, so no model was called |
+| `extract_ms`, `inference_ms` | where the time went |
 | `notes` | why the reader chose the route it chose |
 | `quality_warning` | present when the source is too coarse to trust |
 
@@ -172,6 +177,10 @@ invoicedrop *.pdf; and echo "alle gelesen"
 | `--verbose` | extraction notes and timings on stderr |
 | `--extract-only`, `-e` | print what the extractor found, skip the model |
 | `--dump-images DIR` | write the rasterised pages as JPEG, for inspection |
+| `--db PATH` | database file, defaults to `~/.local/share/invoicedrop/invoicedrop.db` |
+| `--no-cache` | read the document again instead of using the store |
+| `--move` | move the original into the archive once every bill was read |
+| `--limit N` | how many bills `history` lists, default 20 |
 
 ### OCR tuning
 
@@ -230,6 +239,43 @@ invoicedrop --model gemma4:latest --json rechnung.pdf | jq '.gross_total'
 invoicedrop --model minicpm-v:8b     --json rechnung.pdf | jq '.gross_total'
 ```
 
+## Cache and history
+
+Every bill that is read is stored in SQLite, so the second run of a document
+costs nothing: extraction drops to 0 ms and the model is not called at all.
+
+```fish
+invoicedrop rechnung.pdf      # 2 s, reads and stores
+invoicedrop rechnung.pdf      # instant, answered from the store
+invoicedrop history           # everything stored, newest first
+invoicedrop history --json    # one JSON object per line
+```
+
+The cache is keyed on the hash of the file **and** on the settings that change
+the answer — model, page limit, dpi, OCR switches. Re-reading a file with
+`--model` or `--pages` therefore does the work again instead of serving an answer
+that was produced under other conditions. `--no-cache` forces it either way:
+
+```fish
+invoicedrop --no-cache --model gemma4:26b rechnung.pdf
+```
+
+`history` prints one line per bill:
+
+```
+2026-09-10 21:02  hofer                 2025-07-09     11,91 EUR  p1 Rechnung 2.jpg
+```
+
+To move originals out of the way once they are read, so the same folder can be
+dropped again without a cache hit hiding new content:
+
+```fish
+invoicedrop --move ~/Rechnungen/*.pdf
+```
+
+Originals land in `~/.local/share/invoicedrop/archive/`. A file is only moved
+when every one of its pages was read.
+
 ## How a document is read
 
 | Input | Route |
@@ -237,6 +283,11 @@ invoicedrop --model minicpm-v:8b     --json rechnung.pdf | jq '.gross_total'
 | PDF with a text layer | text is read directly, nothing is rasterised, under 5 ms |
 | PDF without a text layer | pages are rendered, downscaled, and sent to the model |
 | JPEG, PNG, TIFF, WebP, BMP | decoded, EXIF rotation applied, downscaled, sent to the model |
+
+**A bill is a page, not a file.** A two page scan holds two receipts and a
+collection PDF holds twenty one, so every page is analysed on its own and yields
+its own record. The page number appears in the result as `file.pdf:2` when a file
+has more than one page.
 
 Text and images go to the model in the same message, so one vision model serves
 all three kinds of input. The reply is constrained to a JSON schema, so the model

@@ -1,6 +1,11 @@
 #include "analysis.h"
 
+#include "hash.h"
+#include "store.h"
+
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QList>
 
 namespace InvoiceDrop {
@@ -25,6 +30,24 @@ QString warningFor(const Extract::DocumentPage &page)
         .arg(shortest);
 }
 
+/// Rebuilds a bill from the database, so a cached run does not touch the file.
+BillResult fromStored(const QString &path, const StoredBill &stored, int pageCount)
+{
+    BillResult bill;
+    bill.path = path;
+    bill.page = stored.page;
+    bill.pageCount = pageCount;
+    bill.ok = stored.status == QStringLiteral("ok");
+    bill.fromCache = true;
+    bill.invoice = Invoice::fromJson(
+        QJsonDocument::fromJson(stored.payload.toUtf8()).object());
+
+    if (!bill.ok)
+        bill.error = QStringLiteral("stored as %1").arg(stored.status);
+    bill.notes.append(QStringLiteral("answered from the cache, stored %1").arg(stored.createdAt));
+    return bill;
+}
+
 } // namespace
 
 QString BillResult::label() const
@@ -37,9 +60,30 @@ QString BillResult::label() const
 
 QVector<BillResult> analyseFile(const QString &path,
                                 const Extract::ReadOptions &readOptions,
-                                OllamaClient &client)
+                                OllamaClient &client,
+                                Store *cache)
 {
     QVector<BillResult> bills;
+
+    // Hashing is a few milliseconds, rasterising and inferring are seconds, so
+    // the cache is consulted before the file is opened at all.
+    QString sha256;
+    if (cache) {
+        sha256 = fileSha256(path);
+        const QString fingerprint = Store::fingerprint(readOptions, client.options().model);
+
+        if (!sha256.isEmpty()) {
+            const std::optional<CachedDocument> cached = cache->find(sha256, fingerprint);
+            if (cached.has_value()) {
+                for (const StoredBill &stored : cache->bills(sha256))
+                    bills.append(fromStored(path, stored, cached->pageCount));
+                if (!bills.isEmpty())
+                    return bills;
+                // A document row without bills is a half written record. Fall
+                // through and read the file again rather than report nothing.
+            }
+        }
+    }
 
     const Extract::Document document = Extract::readDocument(path, readOptions);
 
@@ -90,6 +134,10 @@ QVector<BillResult> analyseFile(const QString &path,
 
         bills.append(bill);
     }
+
+    if (cache && !sha256.isEmpty())
+        cache->save(sha256, Store::fingerprint(readOptions, client.options().model), document,
+                    bills, client.options().model);
 
     return bills;
 }

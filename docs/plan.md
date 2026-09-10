@@ -23,7 +23,7 @@ file watcher. Non-goals until phase 5: no QML at all.
 | 0 | Skeleton that compiles, prints version | `invoicedrop --version` | **done** |
 | 1 | Extraction only, no AI | `invoicedrop --extract-only f.pdf` | **done** |
 | 2 | **MVP**: shop, date, sum from a real invoice | `InvoiceDrop bill1.pdf` | **done** |
-| 3 | SQLite store, hash cache, history | `invoicedrop history` | to do |
+| 3 | SQLite store, hash cache, history | `invoicedrop history` | **done** |
 | 4 | Daemon: inbox watch, DBus, notifications | `invoicedrop daemon` | to do |
 | 5 | Plasma widget | drag and drop in the panel | to do |
 | 6 | Packaging, PKGBUILD, doctor | `pacman -U` | to do |
@@ -285,6 +285,30 @@ Steps:
 Verify: the second run of the same file reports `cached`, `invoicedrop history`
 lists both entries, and deleting the row makes the tool re-analyse.
 
+### What phase 3 actually found
+
+Phase 2 changed the unit of output from the file to the page, because one PDF can
+hold twenty one bills. The store follows that: bills are keyed on
+`(sha256, page)`, so a collection document is cached per bill and re-reading it
+costs nothing.
+
+1. **A hash alone is not a cache key.** The same file read with a different model,
+a different page limit or a different dpi is a different question. A
+   `fingerprint` of the settings that change the answer is stored alongside the
+   hash, and a cache hit needs both. Without it, switching `--model` would serve
+   the old model's answers from disk and look like a regression.
+2. **`QStandardPaths::AppLocalDataLocation` appends the organisation and the
+   application name.** With both set to `InvoiceDrop` the database landed in
+   `~/.local/share/InvoiceDrop/InvoiceDrop/`, and `--move` reported the same
+   doubled path. Everything now goes through `Paths::dataDir()`, which builds
+   `~/.local/share/invoicedrop` explicitly, matching what the documents describe.
+3. **The cache is checked before the file is opened.** Hashing is milliseconds,
+   rasterising and inferring are seconds. A cache hit on the two page receipt
+   drops from 4 s to 0 ms of extraction and 0 ms of inference.
+
+Line items were dropped from the schema in phase 2 and are still absent. Nothing
+reads them, and they multiply the output tokens of every request.
+
 ---
 
 ## Phase 4 — Background service
@@ -423,6 +447,15 @@ Phase 2 is done when all of the following hold:
 
 ## Open decisions
 
+* **The `bills` suite is red, on purpose.** It expects `BERTAHÜTTE` and the model
+  reads `BERTAHOTTE`, and the year of the Bertahütte receipt is flaky (2022
+  against 2025). The paper says `BERTAHÜTTE` and `22/07/2025`, so the expectation
+  is right and the model is wrong. A prompt addition asking for umlauts and
+  careful year digits was measured and reverted: it did not fix the umlaut, left
+  the year wrong and made the vendor field swallow the address block.
+* **Multi-invoice documents: resolved as one bill per page.** The store, the test
+  and the output all treat a page as a bill. A single invoice spread over two
+  pages therefore yields two records, which is the known cost of the rule.
 * **Resolved in phase 2: `gemma4:latest` is the default model.** `minicpm-v:8b`
   was measured against it and lost on accuracy, on stability and by a factor of
   six on time. Any model that reports the `vision` capability works; the choice
@@ -431,10 +464,6 @@ Phase 2 is done when all of the following hold:
 * **Resolved in phase 1: the Tesseract pre-pass is off by default.** It reads
   clean scans, but on every photographed receipt in the test set it produced
   confident garbage that would be fed to the model as evidence. `--ocr` opts in.
-* **Multi-invoice documents.** A single PDF can hold 21 receipts. Phase 3 must
-  decide between per-page extraction, a page cap that reports truncation, or
-  several records per file. Currently the cap truncates silently.
-* Page cap default of 4. Revisit once the collection files above are handled.
 * Whether to also send page images when the text layer route fired. The ÖBB
-  invoice is now read correctly from text alone, so the token cost is currently
-  not buying anything.
+  invoice is read correctly from text alone, so the token cost is currently not
+  buying anything.
