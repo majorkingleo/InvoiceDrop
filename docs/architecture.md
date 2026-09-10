@@ -444,17 +444,78 @@ sudo cmake --install build
 ```
 
 * `src/CMakeLists.txt` builds `invoicedrop`. `find_package` pulls Qt6 `Core
-  Network Sql DBus`, plus `ECM` for the install layout and the systemd/bus
-  destination directories. C++20 is required. No KDE Frameworks are linked: the
-  notification interface and the DBus adaptor are both plain Qt.
-* MuPDF, Tesseract and Leptonica are located with `pkg_check_modules`.
+  Network Sql DBus`, and `include(GNUInstallDirs)` supplies the install
+  destinations. C++20 is required. No KDE Frameworks are linked and
+  `extra-cmake-modules` is not used: the notification interface and the DBus
+  adaptor are both plain Qt, and `GNUInstallDirs` already resolves `bin`, `lib`
+  and `share` correctly on Arch.
+* MuPDF, Tesseract and Leptonica are located with `pkg_check_modules`. They are
+  linked, never executed, so there is no subprocess to version-check and nothing
+  to shell out to.
 * The DBus adaptor carries its introspection inline, so there is no XML file to
   compile and no code generator in the build. The D-Bus service file and the
   systemd user unit are configured from `data/*.in` with the real install paths.
-* The systemd unit, the `.desktop` file and the icon are installed by the same
-  CMake project. The plasmoid stays pure QML and is installed separately with
-  `kpackagetool6`; it never needs rebuilding for a daemon change.
+* The systemd unit, the `.desktop` file, the icon and the plasmoid are installed
+  by the same CMake project, so `cmake --install` and the package contain exactly
+  the same files. The plasmoid stays pure QML and never needs rebuilding for a
+  daemon change.
 
 Build-time only: `cmake`, `ninja`, `pkgconf`.
 Runtime: `mupdf`, `tesseract`, `tesseract-data-deu`, `tesseract-data-eng`,
 `leptonica`, Qt6 libraries, and a running Ollama.
+
+## Installation layout
+
+`cmake --install` writes thirteen files. Nothing is placed outside the prefixes
+`GNUInstallDirs` defines.
+
+| Prefix | File | Purpose |
+|--------|------|---------|
+| `bin` | `invoicedrop` | the only executable |
+| `bin` | `InvoiceDrop` | symlink, so both spellings work |
+| `lib/systemd/user` | `invoicedrop.service` | starts the daemon at login |
+| `share/dbus-1/services` | `org.kde.invoicedrop.service` | starts the daemon on the first CLI call |
+| `share/applications` | `com.github.invoicedrop.desktop` | application menu entry |
+| `share/icons/hicolor/scalable/apps` | `com.github.invoicedrop.svg` | the icon, under the reverse-DNS name |
+| `share/plasma/plasmoids` | `com.github.invoicedrop/` | the widget, all of it |
+| `share/licenses/invoicedrop` | `LICENSE` | GPL-3.0-or-later text |
+
+**The systemd unit destination depends on the prefix, and `GNUInstallDirs` gets
+it wrong on purpose.** It answers `lib` for every prefix, which is correct for
+`/usr` and broken for `$HOME/.local`: `systemd-analyze --user unit-paths` lists
+`~/.local/share/systemd/user` and does not list `~/.local/lib/systemd/user`, so a
+unit installed under the latter is written, reads correctly, and is never
+consulted. `systemctl --user start invoicedrop` then reports a unit that does not
+exist, which is a confusing way to find out. `src/CMakeLists.txt` therefore maps
+a system prefix to `lib/systemd/user` and anything else to `share/systemd/user`.
+The D-Bus service file needs no such treatment, because
+`<standard_session_servicedirs/>` covers `$XDG_DATA_HOME/dbus-1/services`, so
+`~/.local/share/dbus-1/services` is found as it is.
+
+**The icon is installed twice under two different names and that is deliberate.**
+The theme gets a copy called `com.github.invoicedrop.svg` after the reverse-DNS
+id, so `Icon=com.github.invoicedrop` in the desktop entry and in the notification
+resolve through the icon theme. The plasmoid gets its own copy under its
+`contents/icons/`, which it loads by relative path and which therefore has no
+need of a theme lookup. Neither can use the other: a packaged plasmoid cannot
+reach into `share/icons` by relative path, and a theme lookup cannot see inside a
+package directory. Splitting them keeps both lookups simple, and the file is
+1.2 kB.
+
+No theme ships an icon named `invoice`. The widget's first version used that name
+and drew an empty square with no error, because a missing icon name in QML is not
+a problem the theme reports. Shipping the icon is what makes the panel show
+anything at all.
+
+**The desktop entry runs `doctor`, not the widget.** It exists so a user who has
+just installed the package has a way to find out why nothing works: it opens a
+terminal, prints the building blocks, the model, the database and the inbox, and
+waits for enter so the output does not vanish. `Terminal=true` is required for
+that, and `Categories=Office;Finance;` is what `desktop-file-validate` accepts --
+two main categories are rejected.
+
+`packaging/PKGBUILD` wraps the same `cmake` calls. It has no `source=()` and
+therefore no checksums, because the project has no release tarball yet: it builds
+from the checkout it sits in, and it reads `$PWD` rather than `$0`, since makepkg
+sources the file and `$0` is `/usr/bin/makepkg`.
+

@@ -9,7 +9,7 @@
         "Category": "Utilities",
         "Description": "Drop invoices and receipts here and read them with a local AI model.",
         "Description[de]": "Rechnungen und Belege hier ablegen und mit einer lokalen KI auslesen.",
-        "Icon": "invoice",
+        "Icon": "com.github.invoicedrop",
         "Id": "com.github.invoicedrop",
         "License": "GPL-3.0-or-later",
         "Name": "InvoiceDrop",

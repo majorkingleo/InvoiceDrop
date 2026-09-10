@@ -59,6 +59,78 @@ sudo cmake --install build     # installs invoicedrop and a InvoiceDrop symlink
 
 `cmake` defaults to a Debug build if no build type is given.
 
+## Install
+
+Into your home directory, which needs no root and is the way to try a change:
+
+```fish
+cmake -B build-local -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$HOME/.local"
+cmake --build build-local
+cmake --install build-local
+```
+
+In VS Code this is **Tasks: Run Task → Install: local (build + install to
+~/.local)**, with two companions: **Install: local (verify)** prints what landed
+and runs `doctor` through the installed binary, and **Install: local (uninstall)**
+takes it all away again using the manifest CMake wrote, leaving your invoices and
+history alone.
+
+The separate `build-local` directory is not a preference. `data/*.service.in` are
+`configure_file` templates and `ExecStart` is baked in from
+`CMAKE_INSTALL_FULL_BINDIR` at configure time, so `cmake --install --prefix
+"$HOME/.local"` on the regular build would write a unit whose `ExecStart` points
+at `/usr/local/bin/invoicedrop`, where nothing was installed. The prefix has to
+be known when CMake configures.
+
+A prefix under `$HOME` also moves the systemd unit: it goes to
+`share/systemd/user/`, not `lib/systemd/user/`. `systemd-analyze --user
+unit-paths` lists `~/.local/share/systemd/user` and does not list
+`~/.local/lib/systemd/user`, so a unit in the latter is written, looks correct
+and is never read. The package, installed under `/usr`, keeps `lib/systemd/user`.
+
+As a package, which is the normal way:
+
+```fish
+cd packaging
+makepkg -si
+```
+
+The `PKGBUILD` builds from this checkout -- there is no release tarball yet, so
+it has no `source=()` and no checksums. Run `makepkg` from inside `packaging/`;
+it reads the source directory from `$PWD` and fails with "The source directory
+/usr does not appear to contain CMakeLists.txt" if you run it from elsewhere. Set
+`INVOICEDROP_SOURCE` to point it at a checkout in a different place.
+
+What the package puts on disk:
+
+| Path | What |
+|------|------|
+| `bin/invoicedrop`, `bin/InvoiceDrop` | the binary and a symlink |
+| `lib/systemd/user/invoicedrop.service` | starts the daemon at login |
+| `share/dbus-1/services/org.kde.invoicedrop.service` | starts the daemon on the first CLI call |
+| `share/applications/com.github.invoicedrop.desktop` | application menu entry |
+| `share/icons/hicolor/scalable/apps/com.github.invoicedrop.svg` | the icon |
+| `share/plasma/plasmoids/com.github.invoicedrop/` | the widget |
+| `share/licenses/invoicedrop/LICENSE` | GPL-3.0-or-later |
+
+**InvoiceDrop in the application menu runs `doctor`, not the widget.** A fresh
+install that does not work yet is the only interesting case, so the menu entry
+opens a terminal, prints what InvoiceDrop can and cannot do, and waits for enter
+before closing. The widget is added to a panel through Plasma's own *Add
+Widgets* dialog; nothing installs it there for you.
+
+After installing, check the ground before blaming the tool:
+
+```fish
+invoicedrop doctor
+```
+
+It reports the PDF engine, OCR, the Ollama endpoint, the model, the database and
+the inbox, and prints the command that fixes whatever is missing. Exit code `0`
+is fine, `2` means something required is broken, which makes it usable as
+`invoicedrop doctor; or echo "not ready"`.
+
 ## Quick start
 
 ```fish
@@ -444,6 +516,15 @@ invoicedrop --extract-only rechnung.pdf | head -40
 `--pages` defaults to 4. A collection of receipts needs a higher value, and note
 that one file currently produces one record.
 
+**Nothing works and you do not know where to start.**
+
+```fish
+invoicedrop doctor
+```
+
+It checks every moving part and prints the command that fixes the broken one.
+It never needs a document, so it works before you have anything to read.
+
 **Reading is slow.**
 Reasoning models are the usual cause; leave `--think` off. The second document in
 a run is much faster than the first because the weights stay resident.
@@ -452,7 +533,8 @@ a run is much faster than the first because the weights stay resident.
 
 ```
 plasmoid/               the Plasma widget, QML only
-data/                   the systemd unit and the D-Bus service file templates
+data/                   the systemd unit, the D-Bus service and the desktop entry
+packaging/              PKGBUILD and the install script for CachyOS/Arch
 src/                    the binary
   cli.cpp               options, output, exit codes, delegation to the daemon
   daemon.{h,cpp}        inbox watching, the DBus interface, notifications
@@ -478,7 +560,9 @@ ctest --test-dir build --output-on-failure
 ```
 
 In VS Code, `Ctrl+Shift+B` builds and **Tasks: Run Test Task** runs the suites.
-`Test: run (verbose)` shows the per-document timings.
+`Test: run (verbose)` shows the per-document timings. A second build directory
+exists for `build-local`, which is what the install tasks use; it is ignored by
+git alongside `build/`.
 
 ## Licence
 

@@ -198,6 +198,69 @@
                 "group": "run"
             }
         },
+        // ------------------------------------------------------------ install
+        // Installs into ~/.local, which needs no root and is on PATH already.
+        // A separate build directory is required rather than --prefix on the
+        // existing one: the systemd unit and the D-Bus service file are
+        // configure_file templates, and ExecStart is baked in from
+        // CMAKE_INSTALL_FULL_BINDIR at configure time. Installing build/ with a
+        // prefix override would place a unit whose ExecStart points at
+        // /usr/local/bin, where nothing was installed.
+        //
+        // CMAKE_INSTALL_PREFIX is the one setting that must be right at
+        // configure time, so it goes into build-local once. Changing any -D
+        // below later needs the directory removed first, otherwise CMake keeps
+        // the cached value and the new flag is ignored without a word.
+        {
+            "label": "Install: local (build + install to ~/.local)",
+            "detail": "Configures build-local, builds Release and installs into ~/.local: binary, symlink, systemd unit, D-Bus service, desktop entry, icon, LICENSE and the plasmoid. Testing is off here to keep the install quick; use the Debug build for that. Plasma caches loaded widgets, so restart plasmashell or re-add the widget before expecting a change to show up.",
+            "type": "shell",
+            "command": "cmake -B build-local -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=\"$HOME/.local\" -DBUILD_TESTING=OFF && cmake --build build-local && cmake --install build-local",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true,
+                "group": "install"
+            }
+        },
+        {
+            "label": "Install: local (verify)",
+            "detail": "Lists what was installed from the manifest cmake wrote, shows which invoicedrop the shell resolves, and runs doctor through the installed binary. A stale copy earlier on PATH is the usual reason a change seems to have no effect.",
+            "type": "shell",
+            "command": "test -f build-local/install_manifest.txt && sort -u build-local/install_manifest.txt; echo; echo '=== which invoicedrop ==='; which invoicedrop; echo; \"${env:HOME}/.local/bin/invoicedrop\" doctor",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true,
+                "group": "install"
+            }
+        },
+        {
+            "label": "Install: local (uninstall)",
+            "detail": "Removes exactly the files cmake recorded in the manifest, plus the InvoiceDrop alias symlink, which the manifest does not mention because CMake creates it with install(CODE) and does not track it. Nothing outside ~/.local/bin and ~/.local/share is touched. Your invoices and history are safe: the database and inbox live in ~/.local/share/invoicedrop, which cmake never installed and this never deletes. Empty directories are left behind.",
+            "type": "shell",
+            "command": "test -f build-local/install_manifest.txt && xargs -r rm -f < build-local/install_manifest.txt && rm -f \"${env:HOME}/.local/bin/InvoiceDrop\" && rm -f build-local/install_manifest.txt && echo 'InvoiceDrop removed from ~/.local' || echo 'build-local/install_manifest.txt is missing, so there is nothing to remove'",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true,
+                "group": "install"
+            }
+        },
         // --------------------------------------------------------------- test
         {
             "label": "Test: run (ctest)",

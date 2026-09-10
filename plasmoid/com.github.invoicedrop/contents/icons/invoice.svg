@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  InvoiceDrop's own mark: a receipt with a torn lower edge and three lines of
+  print. Drawn rather than taken from the icon theme, because no theme ships
+  anything named invoice, and a missing icon is a blank square in the panel.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e8ecef"/>
+    </linearGradient>
+  </defs>
+
+  <!-- The receipt, with a torn off bottom edge. -->
+  <path d="M14 6h36v44l-4-3-4 3-4-3-4 3-4-3-4 3-4-3-4 3-4-3z"
+        fill="url(#paper)" stroke="#3b4252" stroke-width="2.5"
+        stroke-linejoin="round"/>
+
+  <!-- Printed lines. The last one is shorter, the way a total is. -->
+  <g stroke="#5e81ac" stroke-width="3" stroke-linecap="round">
+    <line x1="21" y1="17" x2="43" y2="17"/>
+    <line x1="21" y1="25" x2="43" y2="25"/>
+    <line x1="21" y1="33" x2="34" y2="33"/>
+  </g>
+
+  <!-- The amount, marked out as the thing that matters. -->
+  <line x1="21" y1="42" x2="42" y2="42" stroke="#3b4252" stroke-width="4"
+        stroke-linecap="round"/>
+</svg>

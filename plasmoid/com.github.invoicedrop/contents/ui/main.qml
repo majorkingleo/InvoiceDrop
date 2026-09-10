@@ -109,7 +109,12 @@ PlasmoidItem {
             anchors.centerIn: parent
             implicitWidth: Kirigami.Units.iconSizes.smallMedium
             implicitHeight: implicitWidth
-            source: root.running > 0 ? "view-refresh" : "invoice"
+            // The package's own mark, resolved by path. KPlugin.Icon in
+            // metadata.json has to be a theme icon name, and no theme ships one
+            // called invoice, so the two are deliberately different.
+            source: root.running > 0
+                ? "view-refresh"
+                : Qt.resolvedUrl("../icons/invoice.svg")
             active: compact.containsMouse
         }
 

@@ -3,6 +3,8 @@
 #include "analysis.h"
 #include "daemon.h"
 #include "extract/documentreader.h"
+#include "extract/ocr.h"
+#include "extract/threadctx.h"
 #include "invoice.h"
 #include "json.h"
 #include "ollama.h"
@@ -141,6 +143,115 @@ int printDelegatedResult(const QString &json, bool asJson)
     out().flush();
     err().flush();
     return failures;
+}
+
+/// `invoicedrop doctor`. Says what is missing and what command fixes it.
+///
+/// Every check names the thing that is absent and the command that puts it
+/// there. A diagnosis that only says "not working" costs the reader a search.
+int runDoctor(const Extract::ReadOptions &readOptions, OllamaClient &client, Store &store)
+{
+    int problems = 0;
+
+    /// `required` is false for the parts that only one optional flag needs, so a
+    /// missing tesseract does not read as a broken installation.
+    const auto check = [&problems](const QString &what, bool ok, bool required,
+                                   const QString &detail, const QString &fix) {
+        const QString mark = ok ? QStringLiteral("  ok    ")
+                                : (required ? QStringLiteral("  FAIL  ")
+                                            : QStringLiteral("  --    "));
+        out() << mark << what.leftJustified(22) << detail << Qt::endl;
+        if (!ok && required) {
+            ++problems;
+            if (!fix.isEmpty())
+                out() << "        fix: " << fix << Qt::endl;
+        }
+    };
+
+    out() << "Building blocks" << Qt::endl;
+
+    // MuPDF, Leptonica and Tesseract are linked in, not shelled out to, so what
+    // matters is not whether a binary is on the PATH but whether the versions
+    // that got linked actually work.
+    const bool mupdfOk = Extract::ThreadCtx::mupdf() != nullptr;
+    check(QStringLiteral("pdf engine"), mupdfOk, true,
+          mupdfOk ? QStringLiteral("MuPDF context created")
+                  : QStringLiteral("cannot create a MuPDF context"),
+          QStringLiteral("pacman -S libmupdf"));
+
+    Extract::OcrOptions ocrCheck = readOptions.ocr;
+    ocrCheck.enabled = true; // the point is to find out whether it could work
+    const bool ocrOk = Extract::Ocr::available(ocrCheck);
+    check(QStringLiteral("ocr"), ocrCheck.enabled && ocrOk, false,
+          ocrOk ? QStringLiteral("tesseract ready for '%1'").arg(readOptions.ocr.languages)
+                : QStringLiteral("tesseract cannot load '%1'").arg(readOptions.ocr.languages),
+          QStringLiteral("pacman -S tesseract tesseract-data-deu tesseract-data-eng"));
+
+    out() << Qt::endl << "Model" << Qt::endl;
+
+    QString probeError;
+    const QStringList models = client.installedModels(&probeError);
+    check(QStringLiteral("endpoint"), probeError.isEmpty(), true,
+          probeError.isEmpty() ? QStringLiteral("%1, %2 model(s) available")
+                                     .arg(client.options().url)
+                                     .arg(models.size())
+                               : probeError,
+          QStringLiteral("systemctl start ollama"));
+
+    if (probeError.isEmpty()) {
+        const QString wanted = client.options().model;
+        const bool found = std::any_of(models.cbegin(), models.cend(),
+                                       [&wanted](const QString &name) {
+            return name == wanted
+                || name.section(QLatin1Char(':'), 0, 0) == wanted.section(QLatin1Char(':'), 0, 0);
+        });
+
+        check(QStringLiteral("model"), found, true,
+              found ? wanted : QStringLiteral("'%1' is not installed").arg(wanted),
+              QStringLiteral("ollama pull %1").arg(wanted));
+    }
+
+    out() << Qt::endl << "Storage" << Qt::endl;
+
+    check(QStringLiteral("database"), store.isOpen(), true,
+          store.isOpen() ? QStringLiteral("%1, %2 bill(s)")
+                               .arg(store.databasePath())
+                               .arg(store.billCount())
+                         : store.error(),
+          QStringLiteral("check that the folder is writable"));
+
+    const QString inbox = QDir(Paths::dataDir()).filePath(QStringLiteral("inbox"));
+    QDir inboxDir(inbox);
+    const bool inboxOk = inboxDir.exists() || inboxDir.mkpath(QStringLiteral("."));
+    check(QStringLiteral("inbox"), inboxOk, true,
+          inboxOk ? inbox : QStringLiteral("cannot create %1").arg(inbox),
+          QStringLiteral("check the permissions on %1").arg(Paths::dataDir()));
+
+    out() << Qt::endl << "Extras" << Qt::endl;
+
+    QDBusConnection bus = QDBusConnection::sessionBus();
+    QDBusConnectionInterface *busInterface = bus.isConnected() ? bus.interface() : nullptr;
+    const bool daemonUp = busInterface
+        && busInterface->isServiceRegistered(QString::fromLatin1(Daemon::kServiceName));
+    check(QStringLiteral("daemon"), true, false,
+          daemonUp ? QStringLiteral("running, calls are delegated to it")
+                   : QStringLiteral("not running, every call loads the model itself"),
+          QString());
+
+    const bool notifications = busInterface
+        && busInterface->isServiceRegistered(QStringLiteral("org.freedesktop.Notifications"));
+    check(QStringLiteral("notifications"), notifications, false,
+          notifications ? QStringLiteral("a notification service is on the bus")
+                        : QStringLiteral("no notification service on the bus"),
+          QString());
+
+    out() << Qt::endl
+          << (problems == 0 ? QStringLiteral("Everything needed is in place.")
+                            : QStringLiteral("%1 problem(s) found.").arg(problems))
+          << Qt::endl;
+    out().flush();
+
+    return problems == 0 ? kExitOk : kExitFailure;
 }
 
 /// `invoicedrop history`. Lists what is stored, newest first.
@@ -427,12 +538,14 @@ int runCli(const QStringList &arguments)
         return kExitUsage;
     }
 
-    // `history` and `daemon` are the subcommands. They are recognised as the
-    // first positional argument because everything else is a file to read.
+    // `history`, `daemon` and `doctor` are the subcommands. They are recognised
+    // as the first positional argument because everything else is a file.
     const bool historyMode =
         files.first() == QStringLiteral("history") && !parser.isSet(extractOnly);
     const bool daemonMode =
         files.first() == QStringLiteral("daemon") && !parser.isSet(extractOnly);
+    const bool doctorMode =
+        files.first() == QStringLiteral("doctor") && !parser.isSet(extractOnly);
 
     if (parser.isSet(textOnly) && parser.isSet(imagesOnly)) {
         err() << "--text-only and --images-only cannot be combined" << Qt::endl;
@@ -470,12 +583,23 @@ int runCli(const QStringList &arguments)
     if (historyMode)
         return runHistory(store, parser.value(limit).toInt(), asJson);
 
+    if (doctorMode) {
+        OllamaOptions doctorOptions;
+        if (parser.isSet(ollamaUrl))
+            doctorOptions.url = parser.value(ollamaUrl);
+        doctorOptions.model = parser.value(model);
+        doctorOptions.timeoutMs = 10000;
+
+        OllamaClient doctorClient(doctorOptions);
+        return runDoctor(options, doctorClient, store);
+    }
+
     // A running daemon already has the model loaded. Handing the work over turns
     // a cold start into a queue entry, and the reply is the same JSON the local
     // path would have produced. --no-cache and --dump-images stay local, because
     // the daemon cannot honour them.
     const bool delegatable = !extractOnlyMode && !parser.isSet(local)
-        && !parser.isSet(noCache) && !parser.isSet(dumpImages) && !daemonMode;
+        && !parser.isSet(noCache) && !parser.isSet(dumpImages) && !daemonMode && !doctorMode;
 
     if (delegatable) {
         const QDBusConnection bus = QDBusConnection::sessionBus();

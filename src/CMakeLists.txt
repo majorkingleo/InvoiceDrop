@@ -95,11 +95,42 @@ configure_file(${CMAKE_SOURCE_DIR}/data/invoicedrop.service.in
 configure_file(${CMAKE_SOURCE_DIR}/data/org.kde.invoicedrop.service.in
                ${CMAKE_BINARY_DIR}/data/org.kde.invoicedrop.service @ONLY)
 
-install(FILES ${CMAKE_BINARY_DIR}/data/invoicedrop.service
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/systemd/user)
+# Where the user unit has to go depends on the prefix, because systemd does not
+# look in one fixed place. `systemd-analyze --user unit-paths` lists
+# ~/.local/share/systemd/user but not ~/.local/lib/systemd/user, so a prefix
+# under $HOME needs the unit in <prefix>/share/systemd/user. A system prefix
+# needs <prefix>/lib/systemd/user. GNUInstallDirs answers "lib" for both, which
+# is right for a package and invisible-but-broken for a local install: the file
+# is written, systemd never reads it, and `systemctl --user start` reports a
+# unit that cannot be found.
+if(CMAKE_INSTALL_PREFIX MATCHES "^/(usr|usr/local)/?$")
+    set(INVOICEDROP_USERUNIT_DIR "${CMAKE_INSTALL_LIBDIR}/systemd/user")
+else()
+    set(INVOICEDROP_USERUNIT_DIR "share/systemd/user")
+endif()
 
+install(FILES ${CMAKE_BINARY_DIR}/data/invoicedrop.service
+        DESTINATION ${INVOICEDROP_USERUNIT_DIR})
+
+# The session bus does not have that problem: <standard_session_servicedirs/>
+# covers $XDG_DATA_HOME/dbus-1/services, so ~/.local/share/dbus-1/services is
+# found without a special case.
 install(FILES ${CMAKE_BINARY_DIR}/data/org.kde.invoicedrop.service
         DESTINATION ${CMAKE_INSTALL_DATADIR}/dbus-1/services)
+
+# The same mark the plasmoid draws, installed under its own name so the icon
+# theme -- and with it the desktop entry and the notifications -- can find it.
+# No theme ships anything called invoice, which is why the package brings one.
+install(FILES ${CMAKE_SOURCE_DIR}/plasmoid/com.github.invoicedrop/contents/icons/invoice.svg
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
+        RENAME com.github.invoicedrop.svg)
+
+install(FILES ${CMAKE_SOURCE_DIR}/data/com.github.invoicedrop.desktop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+
+install(FILES ${CMAKE_SOURCE_DIR}/LICENSE
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/invoicedrop
+        OPTIONAL)
 
 # Convenience alias so both spellings work on a case sensitive filesystem.
 install(CODE "

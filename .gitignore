@@ -53,3 +53,10 @@ compile_flags.txt
 *.log
 tests/testdata/generated/
 /out/
+
+# makepkg scratch space and finished packages
+packaging/src/
+packaging/pkg/
+packaging/*.pkg.tar.zst
+packaging/*.pkg.tar.xz
+packaging/*.pkg.tar.gz

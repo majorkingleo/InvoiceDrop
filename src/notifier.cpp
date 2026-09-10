@@ -52,7 +52,7 @@ void Notifier::notify(const QString &summary, const QString &body, bool urgent)
     QDBusReply<uint> reply = notifications.call(
         QStringLiteral("Notify"), QString::fromLatin1(kAppName),
         static_cast<uint>(0),                          // replaces an earlier toast
-        QStringLiteral("invoice"),                     // icon name
+        QStringLiteral("com.github.invoicedrop"),            // icon name, installed by the package
         summary, body, QStringList(), hints,
         static_cast<int>(8000));                       // milliseconds
 

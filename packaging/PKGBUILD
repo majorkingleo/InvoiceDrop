@@ -1,0 +1,86 @@
+# Maintainer: Martin
+#
+# InvoiceDrop is not published anywhere yet, so this builds from a local source
+# tree. Point _srcdir at the checkout and run makepkg inside this folder.
+#
+#   cd packaging && makepkg -si
+#
+# A local build is the honest state of the project: there is no release tarball
+# and no checksum to pin, which is why there is no source=() array. Packaging for
+# a real repository means adding one and filling in the sums.
+
+pkgname=invoicedrop
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Read invoices and receipts with a local AI model"
+arch=('x86_64')
+url="https://github.com/example/invoicedrop"
+license=('GPL-3.0-or-later')
+depends=(
+    'qt6-base'
+    'libmupdf'
+    'leptonica'
+    'tesseract'
+)
+optdepends=(
+    'tesseract-data-deu: German OCR, only needed for --ocr'
+    'tesseract-data-eng: English OCR, only needed for --ocr'
+    'ollama: the model server, without it nothing can be read'
+    'ollama-cuda: the model server, on NVIDIA'
+    'ollama-rocm: the model server, on AMD'
+)
+makedepends=(
+    'cmake'
+    'ninja'
+    'pkgconf'
+    # Brings qmlscene6, which runs the plasmoid suite. Without it CMake drops
+    # that one test and check() still passes, having checked less.
+    'qt6-declarative'
+)
+# The plasmoid is QML and needs no build, only somewhere to be installed.
+install=invoicedrop.install
+
+# Derived from the working directory, not from $0: makepkg sources this file, so
+# $0 is /usr/bin/makepkg and "$(dirname "$0")/.." resolves to /usr. Run makepkg
+# from inside this directory, or point INVOICEDROP_SOURCE at the checkout.
+_srcdir="$(realpath "${INVOICEDROP_SOURCE:-$PWD/..}")"
+
+build() {
+    # A fresh build directory. makepkg cannot clean this one: it normally wipes
+    # and repacks $srcdir, but there is no source array for it to unpack, so a
+    # leftover build/ survives from the last run. CMake then answers with the
+    # cached configuration, which quietly ignores every -D below -- the first
+    # version of this file passed -DBUILD_TESTING=ON and check() ran ctest over a
+    # directory configured with it OFF, reporting "No tests were found!!!".
+    rm -rf build
+
+    # Testing stays on, otherwise check() has nothing to run. CMake skips the
+    # suite by itself when Qt6 Test or qmlscene6 are missing, so a build host
+    # without them still produces a package.
+    cmake -S "$_srcdir" -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DBUILD_TESTING=ON
+    cmake --build build
+}
+
+check() {
+    # The fast suites only. `bills` needs a running model and is not a packaging
+    # concern.
+    ctest --test-dir build -E bills --output-on-failure
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+
+    # The plasmoid package ships an SVG for its own use. Making it a themed icon
+    # as well lets the desktop entry and the notifications find it by name.
+    install -Dm644 \
+        "$_srcdir/plasmoid/com.github.invoicedrop/contents/icons/invoice.svg" \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/com.github.invoicedrop.svg"
+
+    install -Dm644 "$_srcdir/data/com.github.invoicedrop.desktop" \
+        "$pkgdir/usr/share/applications/com.github.invoicedrop.desktop"
+
+    install -Dm644 "$_srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

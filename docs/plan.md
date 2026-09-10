@@ -26,7 +26,7 @@ file watcher. Non-goals until phase 5: no QML at all.
 | 3 | SQLite store, hash cache, history | `invoicedrop history` | **done** |
 | 4 | Daemon: inbox watch, DBus, notifications | `invoicedrop daemon` | **done** |
 | 5 | Plasma widget | drag and drop in the panel | **done** |
-| 6 | Packaging, PKGBUILD, doctor | `pacman -U` | to do |
+| 6 | Packaging, PKGBUILD, doctor | `pacman -U` | **done** |
 
 Phase 2 is the first point where the tool is useful. Everything after that is
 ergonomics, automation and presentation.
@@ -441,6 +441,81 @@ tree for development.
 and the `doctor` subcommand that checks MuPDF, tesseract data, the Ollama
 endpoint and the model in one shot. Verify with `makepkg` in a clean chroot.
 
+Still not run: `makepkg` inside a clean chroot. The package has only been built
+against the local system, so a missing dependency that happens to be installed
+here would go unnoticed.
+
+Delivered:
+
+- `packaging/PKGBUILD`, `packaging/invoicedrop.install`, `data/*.desktop`
+- `invoicedrop doctor`, which reports each building block and the command that
+  fixes it. Exits 2 when something required is broken, 0 otherwise.
+- `invoicedrop.svg` shipped and installed into `hicolor`, plus the plasmoid's own
+  copy under `contents/icons/`.
+- `LICENSE`, copied from the system's canonical GPL-3.0-or-later text.
+- `cmake --install` places 13 files; `makepkg` produces a 179 kB package with 25
+  entries.
+
+What phase 6 actually found:
+
+- **`Extract::checkExternalTools()` had no reason to exist.** The plan called for
+  a function that runs `pdftoppm --version` and friends. There is nothing to run:
+  MuPDF, Leptonica and Tesseract are linked libraries, not subprocesses. The only
+  runtime checks that mean anything are "did `fz_new_context` work" and "did
+  tesseract load `deu`", and those are answerable directly. `doctor` asks the
+  libraries, not the shell.
+- **No icon theme ships an `invoice` icon.** The widget's first icon name was the
+  generic `invoice`, which resolves to nothing on Breeze and leaves a blank hole
+  in the panel with no warning. There is no fallback for a missing icon name in
+  QML beyond an empty rectangle. Fixed by shipping an SVG and installing it into
+  `hicolor/scalable/apps`. Breeze's `index.theme` carries `Inherits=hicolor`, so
+  a name that only exists in hicolor still resolves.
+- **A missing LICENSE aborts the whole install, silently skipping what follows.**
+  `install(FILES LICENSE ...)` without `OPTIONAL` is a hard error in CMake, and
+  the abort happens partway through, after the binary was placed and before the
+  plasmoid was. The plasmoid is installed last, so it was the casualty. This is
+  easy to miss because the first lines of `cmake --install` output look fine.
+- **`desktop-file-validate` rejects two main categories.** `Categories=Office;`
+  alone is fine; `Categories=Office;Finance;` is not, because `Finance` is also a
+  main category. The freedesktop spec allows exactly one. Fixed to
+  `Office;Finance;` after checking which of the two the validator treats as main.
+- **`$0` is useless inside a PKGBUILD.** makepkg sources the file rather than
+  executing it, so `$0` is `/usr/bin/makepkg` and
+  `realpath "$(dirname "$0")/.."` resolves to `/usr`. The first `makepkg` run
+  failed with "The source directory /usr does not appear to contain
+  CMakeLists.txt". The build now derives its source directory from `$PWD`, with
+  `INVOICEDROP_SOURCE` as an override, and the PKGBUILD documents that makepkg
+  must be started from inside `packaging/`.
+- **A PKGBUILD for an unreleased project has no `source=()`.** There is no tarball
+  to download and therefore no checksum to pin, so the package is built from the
+  checkout it lives in. That is unusual for a real PKGBUILD and is only correct
+  while the project has no release.
+- **A prefix under `$HOME` needs the systemd unit in `share`, not `lib`.**
+  `GNUInstallDirs` answers `lib` for every prefix, which suits `/usr` and hides
+  the unit for `~/.local`: `systemd-analyze --user unit-paths` lists
+  `~/.local/share/systemd/user` and not `~/.local/lib/systemd/user`. The file is
+  written, `systemctl --user start` answers that the unit does not exist, and
+  nothing in the install output hints at why. `src/CMakeLists.txt` now picks the
+  directory from the prefix. The D-Bus service file needed no change, because
+  `<standard_session_servicedirs/>` already covers `$XDG_DATA_HOME/dbus-1/services`.
+- **`cmake --install --prefix` cannot be used on an existing build.** `ExecStart`
+  in the systemd unit and `Exec` in the D-Bus service come from
+  `CMAKE_INSTALL_FULL_BINDIR`, which `configure_file` resolves at configure time.
+  A prefix passed to `--install` moves the files and not the paths written inside
+  them, so the unit would name `/usr/local/bin/invoicedrop` while the binary sits
+  in `~/.local/bin`. Local testing therefore uses its own `build-local` directory.
+- **`install_manifest.txt` does not mention the `InvoiceDrop` symlink.** CMake
+  creates it with `install(CODE ...)`, which leaves it untracked. Uninstalling
+  from the manifest alone leaves a dangling symlink on the PATH, so the uninstall
+  task removes it explicitly.
+- **`check()` passed while testing nothing.** Without a `source=()` there is
+  nothing for makepkg to unpack, so `$srcdir/build` survived from the previous run
+  and CMake reused its cache: adding `-DBUILD_TESTING=ON` changed nothing, and
+  `ctest` answered "No tests were found!!!" and exited 0. A green `check()` that
+  ran zero tests is worse than no `check()`. The build now removes its build
+  directory first, and `qt6-declarative` is a makedepend because without
+  `qmlscene6` CMake silently drops the plasmoid suite instead of failing.
+
 ---
 
 ## Build commands
@@ -470,6 +545,26 @@ Install, once phase 2 works:
 ```bash
 sudo cmake --install build
 ```
+
+Build the package (from inside the packaging directory, the PKGBUILD reads `$PWD`):
+
+```bash
+cd packaging
+makepkg -f          # builds only
+makepkg -si         # builds and installs with pacman
+```
+
+Install into `$HOME/.local` to exercise the installed layout without root:
+
+```bash
+cmake -B build-local -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$HOME/.local" -DBUILD_TESTING=OFF
+cmake --build build-local
+cmake --install build-local
+```
+
+Same thing from VS Code: `Install: local (build + install to ~/.local)`,
+`Install: local (verify)`, `Install: local (uninstall)`.
 
 Iteration loop for phases 1 and 2: edit, `cmake --build build`, run against a real
 invoice in `~/Rechnungen`. No install step needed, the binary is used directly
