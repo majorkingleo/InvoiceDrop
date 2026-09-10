@@ -1,0 +1,11 @@
+{
+    "bills": [
+        {
+            "bill": 1,
+            "vendor": "Unser Lagerhaus Warenhandels Ges.m.b.H",
+            "date": "2025-07-17",
+            "gross_total": 18.48,
+            "currency": "EUR"
+        }
+    ]
+}
