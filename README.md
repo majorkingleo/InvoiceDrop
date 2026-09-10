@@ -12,9 +12,46 @@ Everything runs on your machine. Inference goes to a local
 [Ollama](https://ollama.com) instance, text extraction and rasterising use MuPDF,
 Leptonica and Tesseract. No document and no field ever leaves the machine.
 
-**Status:** the command line tool is complete and usable. The Plasma widget is
-phase 5 of the plan and does not exist yet. See `docs/plan.md` for what each
-phase delivered and `docs/architecture.md` for how it works inside.
+**Status:** every phase in `docs/plan.md` is finished. The command line tool, the
+cache, the daemon, the Plasma widget and the package all work. One thing is
+currently red: the `bills` suite, which compares what the model read against the
+expected results in `tests/testdata/`, and which fails on the model's reading
+rather than on the code's. `docs/plan.md` records what each phase delivered and
+`docs/architecture.md` how it works inside.
+
+## Vibecoded
+
+This project was written in a chat, not by hand. The code, the tests and this
+document were produced by **DeepSeek V4 Flash**, through GitHub Copilot in VS Code
+1.137.0 on CachyOS, over the 10th and 11th of September 2026. The model was
+reached through the `vizards.deepseek-v4-for-copilot` extension, version 0.8.2.
+The requirements, the real invoices, the hardware and every decision along the way
+came from a human, who ran the result and judged it.
+
+That is worth knowing before reading the rest, because it changes what this prose
+is evidence of. Three rules were followed while writing:
+
+* **A claim that says "measured" was measured.** The default for `--think`, the
+  choice of `gemma4:latest` over `minicpm-v:8b`, the decision to leave OCR off, the
+  quality warning threshold — each of those came from running the thing against
+  the documents in `tests/testdata/` and writing down what came out.
+* **What could not be checked says so.** `makepkg` inside a clean chroot, for one,
+  has not been run, and `docs/plan.md` says that rather than implying it works.
+* **Each phase records what it got wrong.** The interesting parts of
+  `docs/plan.md` are the bugs, and most were found by running a flag rather than
+  by re-reading the code: a page rendered at twice its size, a `--pages` limit
+  that invented bills for pages it had skipped, a `check()` that passed while
+  testing nothing.
+
+What it does not mean is that any of this is right because it compiles. Nobody has
+read the code line by line, and an assistant is very good at producing something
+that merely looks considered. The tests are the guard: six suites, five of which
+need neither a model nor a network and finish in about five seconds
+(`ctest --test-dir build -E bills`). Where the reasoning is checkable it is
+written down in `docs/architecture.md`, so it can be argued with.
+
+If a paragraph here reads like a confident guess, treat it as one. The documents
+try to say which ones are.
 
 ## Requirements
 
@@ -464,8 +501,13 @@ by the bus:
 
 | File | Goes to |
 |------|---------|
-| `invoicedrop.service` | `${XDG_DATA_HOME:-~/.local/share}/../systemd/user`, as a user unit |
-| `org.kde.invoicedrop.service` | the D-Bus service directory, for on-demand activation |
+| `invoicedrop.service` | `lib/systemd/user` under a system prefix, `share/systemd/user` under `$HOME` |
+| `org.kde.invoicedrop.service` | `share/dbus-1/services`, for on-demand activation |
+
+The two systemd destinations are not a slip: `systemd-analyze --user unit-paths`
+lists `~/.local/share/systemd/user` and does not list `~/.local/lib/systemd/user`,
+so a unit for a `$HOME` prefix has to land in `share`. A package under `/usr`
+keeps `lib`.
 
 ```fish
 systemctl --user enable --now invoicedrop     # after installing
@@ -473,7 +515,8 @@ systemctl --user status invoicedrop
 ```
 
 Without enabling anything, the first CLI call starts the daemon through D-Bus
-activation.
+activation, because `<standard_session_servicedirs/>` covers
+`$XDG_DATA_HOME/dbus-1/services` as well as the system directories.
 
 ## Cache and history
 Every bill that is read is stored in SQLite, so the second run of a document
