@@ -15,7 +15,7 @@
         "Name": "InvoiceDrop",
         "Name[de]": "InvoiceDrop",
         "Version": "0.1.0",
-        "Website": "https:///majorkingleo/InvoiceDrop"
+        "Website": "https://github.com/majorkingleo/InvoiceDrop"
     },
     "X-Plasma-API-Minimum-Version": "6.0"
 }
