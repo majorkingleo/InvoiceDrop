@@ -316,6 +316,35 @@ count. It formats in the locale it is handed rather than calling `Qt.locale()`
 itself, which is what lets `tst_plasmoid.qml` pin `de_DE` and assert on the
 separators.
 
+## Process boundaries
+
+Every path that crosses a process boundary is made absolute first, because the
+other side has no way to know where it came from.
+
+`invoicedrop tests/testdata/rechnung.pdf` from the workspace root worked locally
+and failed as soon as the daemon was on the bus: the CLI sent the argument over
+D-Bus exactly as typed, the daemon had been started by the session bus with
+`$HOME` as its working directory, and answered `file does not exist`. The path was
+correct, the file was there, and the one piece of information needed to find it —
+the caller's directory — is not part of a D-Bus call. Nothing on the receiving
+side can recover it.
+
+So `Paths::resolvePath` runs at the edge, in two places on purpose:
+
+* In `runCli`, once the run is known to be about files. **After** the
+  `history`/`daemon`/`doctor` comparison, because `resolvePath` turns a word into
+  `<cwd>/word` when no such file exists, which would hide the subcommands from the
+  comparison and break them.
+* In `analyseFile`, which the CLI, the daemon and the tests all call. Resolving
+  here means a new caller cannot reintroduce the bug by forgetting, and it is why
+  the daemon needs no special handling for paths it receives.
+
+An existing path is canonicalised, resolving symlinks and `..`; a missing one is
+merely made absolute, because the useful thing to do with a path that does not
+resolve is to name it in the error. The hash, the cache key and the archive all
+work on the resolved path, so the same file reached by two spellings is one
+document.
+
 ## Ollama integration
 
 ```http

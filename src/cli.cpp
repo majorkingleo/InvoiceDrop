@@ -446,7 +446,8 @@ int runCli(const QStringList &arguments)
     const QCommandLineOption imagesOnly(QStringLiteral("images-only"),
                                         QStringLiteral("Always rasterise, never read the text layer."));
     const QCommandLineOption json(QStringLiteral("json"),
-                                  QStringLiteral("Write one JSON object per file to stdout."));
+                                  QStringLiteral("Write one JSON object per bill, one per line, to "
+                                                 "stdout."));
     const QCommandLineOption dpi(QStringLiteral("dpi"),
                                  QStringLiteral("Raster resolution for PDF pages."),
                                  QStringLiteral("dpi"), QStringLiteral("200"));
@@ -571,8 +572,15 @@ int runCli(const QStringList &arguments)
     fullArguments.append(arguments);
     parser.process(fullArguments);
 
-    const QStringList files = parser.positionalArguments();
-    if (files.isEmpty()) {
+    // Absolute before anything else looks at them. A relative path is only
+    // meaningful next to the shell it was typed in, and the daemon that may end
+    // up doing the reading was started by the session bus in `$HOME`, where
+    // `tests/testdata/rechnung.pdf` does not exist. The subcommands below are
+    // matched on the first argument, and `resolvePath` leaves those words alone
+    // because there is no such file to canonicalise.
+    const QStringList positional = parser.positionalArguments();
+
+    if (positional.isEmpty()) {
         err() << "no input files given" << Qt::endl << Qt::endl;
         err() << parser.helpText();
         err().flush();
@@ -582,11 +590,29 @@ int runCli(const QStringList &arguments)
     // `history`, `daemon` and `doctor` are the subcommands. They are recognised
     // as the first positional argument because everything else is a file.
     const bool historyMode =
-        files.first() == QStringLiteral("history") && !parser.isSet(extractOnly);
+        positional.first() == QStringLiteral("history") && !parser.isSet(extractOnly);
     const bool daemonMode =
-        files.first() == QStringLiteral("daemon") && !parser.isSet(extractOnly);
+        positional.first() == QStringLiteral("daemon") && !parser.isSet(extractOnly);
     const bool doctorMode =
-        files.first() == QStringLiteral("doctor") && !parser.isSet(extractOnly);
+        positional.first() == QStringLiteral("doctor") && !parser.isSet(extractOnly);
+
+    const bool subcommand = historyMode || daemonMode || doctorMode;
+
+    // A relative path is only meaningful next to the shell it was typed in, and
+    // the daemon that may end up doing the reading was started by the session
+    // bus in `$HOME`, where `tests/testdata/rechnung.pdf` does not exist. So the
+    // paths are made absolute here, at the edge, before they are printed, hashed,
+    // cached or sent over the bus.
+    //
+    // After the subcommand check, not before: `resolvePath` turns a word into
+    // `<cwd>/word` when no such file exists, which would hide `history` from the
+    // comparison above. It also means `invoicedrop history` keeps working from
+    // any directory, where an absolute path would be a file that is not there.
+    QStringList files = positional;
+    if (!subcommand) {
+        for (QString &file : files)
+            file = Paths::resolvePath(file);
+    }
 
     if (parser.isSet(textOnly) && parser.isSet(imagesOnly)) {
         err() << "--text-only and --images-only cannot be combined" << Qt::endl;

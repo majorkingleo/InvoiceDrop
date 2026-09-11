@@ -587,6 +587,29 @@ the card and in the toast. The rule is in three places — `bills.size() > 1` in
 `printFileSum`, `run.length > 1` in `subtotalsFor`, and `bills.size() > 1` in
 `Notifier::bodyFor`.
 
+Found after the phase was called done, by using it:
+
+- **A relative path did not survive the trip to the daemon.** Run from the
+  workspace root, `invoicedrop tests/testdata/x.pdf` printed `-  -  -` and then
+  `file does not exist`, while `--local` worked and an absolute path worked. The
+  CLI handed the argument to the daemon over D-Bus as typed, and the daemon was
+  started by the session bus with `$HOME` as its working directory, so
+  `tests/testdata/x.pdf` did not exist anywhere the daemon could look. No amount
+  of care on the daemon side fixes it: the caller's directory is not part of the
+  data. `Paths::resolvePath` now runs in the CLI — after the subcommand check, so
+  that `history` is not turned into `<cwd>/history` — and again inside
+  `analyseFile`, which is the one entry point the CLI, the daemon and the tests
+  share, so a future caller cannot reintroduce it.
+- **The first attempt at that fix broke the subcommands.** Resolving before the
+  `history`/`daemon`/`doctor` comparison turned the word into an absolute path that
+  matched nothing, and `invoicedrop history` stopped working. Caught by running
+  the three subcommands, not by reading the diff.
+- **`tst_paths` exists because two bugs had already happened there.** The relative
+  path above, and the earlier doubled data directory from
+  `QStandardPaths::AppLocalDataLocation`. Both are now assertions. The end to end
+  case — relative path, daemon on the bus — cannot be a ctest entry without a
+  running daemon, so it was verified by hand and the reasoning is recorded here.
+
 ---
 
 ## Build commands
@@ -655,6 +678,9 @@ from the build tree.
   `qmlscene6`.
 * `tst_totals` — the per file sums: mixed currencies, a bill that failed inside a
   total that still adds up, a file cut by the page limit, and cent rounding.
+* `tst_paths` — reading `paths.cpp`: a relative path becomes absolute, an existing
+  one is canonicalised, a missing one is still made absolute so the error can name
+  it, and the data directory is not doubled.
 * `tst_bills` — an integration suite. It needs Ollama and skips itself without
   one, and it is the only suite that can be red for a model's reasons rather than
   the code's.

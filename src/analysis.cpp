@@ -1,6 +1,7 @@
 #include "analysis.h"
 
 #include "hash.h"
+#include "paths.h"
 #include "store.h"
 
 #include <QFileInfo>
@@ -65,18 +66,25 @@ QVector<BillResult> analyseFile(const QString &path,
 {
     QVector<BillResult> bills;
 
+    // Resolved once, at the only entry point every caller shares. The daemon is
+    // reached over D-Bus with no idea of the caller's working directory, so a
+    // relative path has to become absolute before it can cross that boundary at
+    // all; doing it here rather than in the CLI also means a future caller
+    // cannot reintroduce the same silent failure.
+    const QString target = Paths::resolvePath(path);
+
     // Hashing is a few milliseconds, rasterising and inferring are seconds, so
     // the cache is consulted before the file is opened at all.
     QString sha256;
     if (cache) {
-        sha256 = fileSha256(path);
+        sha256 = fileSha256(target);
         const QString fingerprint = Store::fingerprint(readOptions, client.options().model);
 
         if (!sha256.isEmpty()) {
             const std::optional<CachedDocument> cached = cache->find(sha256, fingerprint);
             if (cached.has_value()) {
                 for (const StoredBill &stored : cache->bills(sha256))
-                    bills.append(fromStored(path, stored, cached->pageCount));
+                    bills.append(fromStored(target, stored, cached->pageCount));
                 if (!bills.isEmpty())
                     return bills;
                 // A document row without bills is a half written record. Fall
@@ -85,11 +93,11 @@ QVector<BillResult> analyseFile(const QString &path,
         }
     }
 
-    const Extract::Document document = Extract::readDocument(path, readOptions);
+    const Extract::Document document = Extract::readDocument(target, readOptions);
 
     if (!document.ok()) {
         BillResult failed;
-        failed.path = path;
+        failed.path = target;
         failed.page = 1;
         failed.pageCount = 1;
         failed.error = document.error;
@@ -112,7 +120,7 @@ QVector<BillResult> analyseFile(const QString &path,
 
     for (int index = 0; index < billsToProduce; ++index) {
         BillResult bill;
-        bill.path = path;
+        bill.path = target;
         bill.page = index + 1;
         bill.pageCount = filePages;
         bill.extractMs = document.elapsedMs;

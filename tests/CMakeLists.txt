@@ -66,6 +66,19 @@ target_link_libraries(tst_totals
 
 add_test(NAME totals COMMAND tst_totals)
 
+# Paths, and the two mistakes that made this suite worth having: a relative path
+# handed to a daemon that has a different working directory, and a data directory
+# that was built from AppLocalDataLocation and came out doubled.
+qt_add_executable(tst_paths tst_paths.cpp)
+
+target_link_libraries(tst_paths
+    PRIVATE
+        invoicedrop-ai
+        Qt6::Test
+)
+
+add_test(NAME paths COMMAND tst_paths)
+
 qt_add_executable(tst_daemon tst_daemon.cpp)
 
 target_link_libraries(tst_daemon

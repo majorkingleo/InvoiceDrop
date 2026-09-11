@@ -45,7 +45,7 @@ is evidence of. Three rules were followed while writing:
 
 What it does not mean is that any of this is right because it compiles. Nobody has
 read the code line by line, and an assistant is very good at producing something
-that merely looks considered. The tests are the guard: six suites, five of which
+that merely looks considered. The tests are the guard: seven suites, six of which
 need neither a model nor a network and finish in about five seconds
 (`ctest --test-dir build -E bills`). Where the reasoning is checkable it is
 written down in `docs/architecture.md`, so it can be argued with.
@@ -644,6 +644,16 @@ invoicedrop doctor
 It checks every moving part and prints the command that fixes the broken one.
 It never needs a document, so it works before you have anything to read.
 
+**`file does not exist`, for a file that is right there.**
+This was a bug, and the message is worth knowing about because it was misleading.
+A relative path is only meaningful next to the shell it was typed in, and the
+daemon that may end up doing the reading is started by the session bus in `$HOME`.
+It cannot see your directory, so `invoicedrop tests/testdata/rechnung.pdf` reached
+it as a path that existed nowhere. Paths are now made absolute in the CLI and again
+in `analyseFile`, so every caller is covered. If you still see this, the file
+really is not where the path says: the label next to the message is only the file
+name, so check the whole path by hand.
+
 **Reading is slow.**
 Reasoning models are the usual cause; leave `--think` off. The second document in
 a run is much faster than the first because the weights stay resident.
@@ -666,7 +676,7 @@ src/                    the binary
   ollama.{h,cpp}        the HTTP client
   store.{h,cpp}         SQLite: documents, bills, the settings fingerprint
   extract/              document reading: MuPDF, Leptonica, Tesseract
-tests/                  six suites, run with ctest
+tests/                  seven suites, run with ctest
   testdata/             real invoices plus their expected results
 docs/architecture.md    how it works and why
 docs/plan.md            what each phase delivered
