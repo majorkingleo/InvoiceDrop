@@ -11,7 +11,7 @@
         "Description[de]": "Rechnungen und Belege hier ablegen und mit einer lokalen KI auslesen.",
         "Icon": "com.github.invoicedrop",
         "Id": "com.github.invoicedrop",
-        "License": "GPL-3.0-or-later",
+        "License": "MIT",
         "Name": "InvoiceDrop",
         "Name[de]": "InvoiceDrop",
         "Version": "0.1.0",

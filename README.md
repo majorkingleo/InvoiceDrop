@@ -149,7 +149,7 @@ What the package puts on disk:
 | `share/applications/com.github.invoicedrop.desktop` | application menu entry |
 | `share/icons/hicolor/scalable/apps/com.github.invoicedrop.svg` | the icon |
 | `share/plasma/plasmoids/com.github.invoicedrop/` | the widget |
-| `share/licenses/invoicedrop/LICENSE` | GPL-3.0-or-later |
+| `share/licenses/invoicedrop/LICENSE` | MIT |
 
 **InvoiceDrop in the application menu runs `doctor`, not the widget.** A fresh
 install that does not work yet is the only interesting case, so the menu entry
@@ -719,4 +719,4 @@ git alongside `build/`.
 
 ## Licence
 
-GPL-3.0-or-later. See `LICENSE`.
+MIT. See `LICENSE`.

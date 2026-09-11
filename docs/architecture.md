@@ -578,7 +578,7 @@ Runtime: `mupdf`, `tesseract`, `tesseract-data-deu`, `tesseract-data-eng`,
 | `share/applications` | `com.github.invoicedrop.desktop` | application menu entry |
 | `share/icons/hicolor/scalable/apps` | `com.github.invoicedrop.svg` | the icon, under the reverse-DNS name |
 | `share/plasma/plasmoids` | `com.github.invoicedrop/` | the widget, all of it |
-| `share/licenses/invoicedrop` | `LICENSE` | GPL-3.0-or-later text |
+| `share/licenses/invoicedrop` | `LICENSE` | MIT text |
 
 **The systemd unit destination depends on the prefix, and `GNUInstallDirs` gets
 it wrong on purpose.** It answers `lib` for every prefix, which is correct for

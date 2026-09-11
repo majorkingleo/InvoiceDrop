@@ -476,7 +476,8 @@ Delivered:
   fixes it. Exits 2 when something required is broken, 0 otherwise.
 - `invoicedrop.svg` shipped and installed into `hicolor`, plus the plasmoid's own
   copy under `contents/icons/`.
-- `LICENSE`, copied from the system's canonical GPL-3.0-or-later text.
+- `LICENSE`, copied from the system's canonical GPL-3.0-or-later text. Changed to
+  MIT afterwards; see below.
 - `cmake --install` places 13 files; `makepkg` produces a 179 kB package with 25
   entries.
 
@@ -796,6 +797,23 @@ Phase 2 is done when all of the following hold:
    that fixes it.
 4. Exit code 0 on success, 2 on failure, so it composes in shell pipelines.
 5. Nothing in the run requires the GUI, a daemon or a running Plasma session.
+
+## Licence changed to MIT
+
+The project was GPL-3.0-or-later through phase 6 and is MIT from here on.
+
+Nothing about the reason is recorded because no reason was given for it, and
+inventing one would be worse than saying so. Three files carried the licence and
+all three changed together, which is the part worth writing down: `LICENSE`, the
+`license=('MIT')` line in the PKGBUILD, and `KPlugin.License` in the plasmoid's
+`metadata.json`. The last one is the easy one to miss, because a widget's licence
+is metadata rather than source and nothing reads it during a build.
+
+One consequence, for whoever comes later: the GPL text could be copied from
+`/usr/share/licenses/spdx/`, and there is no `MIT.txt` there, so the text now in
+`LICENSE` has to be maintained by hand. `Copyright (c) 2026 Martin Oberzalek` was
+taken from the plasmoid's `metadata.json`, which is the only place a copyright
+holder was already named.
 
 ## Open decisions
 

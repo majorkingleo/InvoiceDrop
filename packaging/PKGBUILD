@@ -15,7 +15,7 @@ pkgrel=1
 pkgdesc="Read invoices and receipts with a local AI model"
 arch=('x86_64')
 url="https://github.com/majorkingleo/InvoiceDrop"
-license=('GPL-3.0-or-later')
+license=('MIT')
 depends=(
     'qt6-base'
     'libmupdf'
