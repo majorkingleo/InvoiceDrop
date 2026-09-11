@@ -22,6 +22,7 @@ class ControlAdaptor : public QDBusAbstractAdaptor
                 "  <interface name=\"org.kde.invoicedrop.Control\">\n"
                 "    <method name=\"Analyze\">\n"
                 "      <arg direction=\"in\" type=\"as\" name=\"paths\"/>\n"
+                "      <arg direction=\"in\" type=\"b\" name=\"notify\"/>\n"
                 "      <arg direction=\"out\" type=\"s\" name=\"bills\"/>\n"
                 "    </method>\n"
                 "    <method name=\"History\">\n"
@@ -40,7 +41,10 @@ public:
     }
 
 public slots:
-    QString Analyze(const QStringList &paths) { return m_daemon->analyzePaths(paths); }
+    QString Analyze(const QStringList &paths, bool notify)
+    {
+        return m_daemon->analyzePaths(paths, notify);
+    }
     QString History(uint limit) { return m_daemon->historyJson(static_cast<int>(limit)); }
     QVariantMap Status() { return m_daemon->status(); }
 
@@ -208,14 +212,15 @@ QString Daemon::historyJson(int limit) const
     return out;
 }
 
-QString Daemon::analyzePaths(const QStringList &paths)
+QString Daemon::analyzePaths(const QStringList &paths, bool announce)
 {
     QString out;
     for (const QString &path : paths) {
         const QVector<BillResult> bills =
             analyseFile(path, m_options.read, m_client, m_store);
         out += billsToJsonLines(bills);
-        notify(path, bills);
+        if (announce)
+            notify(path, bills);
     }
     return out;
 }

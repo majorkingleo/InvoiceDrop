@@ -23,5 +23,9 @@
             <label>Move a document into the archive once it was read</label>
             <default>false</default>
         </entry>
+        <entry name="notify" type="Bool">
+            <label>Announce a finished document with a desktop notification</label>
+            <default>true</default>
+        </entry>
     </group>
 </kcfg>

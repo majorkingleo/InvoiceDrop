@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(InvoiceDrop
     VERSION 0.1.0
     DESCRIPTION "Analyse invoices with a local AI model"
-    HOMEPAGE_URL "https://github.com/example/invoicedrop"
+    HOMEPAGE_URL "https://github.com/majorkingleo/InvoiceDrop"
     LANGUAGES CXX
 )
 

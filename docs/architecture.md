@@ -42,8 +42,17 @@ inside the single C++ process.
 ## The widget
 
 QML only, no C++ plugin and no build step. `main.qml` is a `DropArea` and a
-`ListView`, `InvoiceCard.qml` is one row, and `config.qml` mirrors the KConfigXT
-keys in `contents/config/main.xml`.
+`ListView`, `InvoiceCard.qml` is one row, and the settings live in
+`contents/config/config.qml`, which is a `ConfigModel` naming its pages, plus
+`contents/ui/config/ConfigGeneral.qml`, which mirrors the KConfigXT keys in
+`contents/config/main.xml`.
+
+The two halves of that must match in both directions and neither mismatch is
+reported: a `ConfigModel` that is missing costs the whole page without a warning,
+a `cfg_` alias with no entry behind it is a control that edits nothing, and an
+entry with no alias is a setting that cannot be reached. `plasmoid-config` checks
+it. The `source` of a `ConfigCategory` is resolved against `contents/ui/`, which
+is why the page is not next to the model that names it.
 
 A drop builds one command and hands it to the `executable` data engine:
 
@@ -83,7 +92,8 @@ CMakeLists.txt                  top level, CMake only
 plasmoid/com.github.invoicedrop/          QML only, no C++ plugin
   metadata.json                 KPackageStructure Plasma/Applet
   contents/config/main.xml      KConfigXT schema
-  contents/config/config.qml    settings UI
+  contents/config/config.qml    ConfigModel, names the dialog pages
+  contents/ui/config/ConfigGeneral.qml  the one page, cfg_* aliases per entry
   contents/ui/main.qml          PlasmoidItem, DropArea, ListView
   contents/ui/InvoiceCard.qml   one result row
   contents/ui/invoicelogic.js   command building and reply parsing, testable
@@ -480,9 +490,16 @@ document here anyway.
 
 | Method | Signature | Purpose |
 |--------|-----------|---------|
-| `Analyze` | `as -> s` | analyse paths, returns one JSON object per bill per line |
+| `Analyze` | `as, b -> s` | analyse paths, returns one JSON object per bill per line. The flag says whether the daemon should announce the result; the widget passes `false` when its notification switch is off, because the daemon is the process that raises the toast and the widget cannot take it back afterwards |
 | `History` | `u -> s` | last N bills as newline separated JSON |
 | `Status` | `-> a{sv}` | busy flag, model, endpoint, inbox, stored count, last file, pending |
+
+D-Bus matches a method by its full argument signature, so adding the flag breaks
+the call against a daemon that is still running from before the change. The CLI
+therefore retries the one-argument form when the two-argument call fails and a
+notification was wanted. Without that, every read for the rest of the session
+would quietly fall back to a local one — correct output, but a model load per
+drop for no reason other than a daemon that is one version behind.
 
 Two files let the bus start the daemon on demand, so nothing has to be enabled by
 hand after a login:

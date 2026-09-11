@@ -1,4 +1,4 @@
-# Maintainer: Martin
+# Maintainer: Martin Oberzalek
 #
 # InvoiceDrop is not published anywhere yet, so this builds from a local source
 # tree. Point _srcdir at the checkout and run makepkg inside this folder.
@@ -14,7 +14,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc="Read invoices and receipts with a local AI model"
 arch=('x86_64')
-url="https://github.com/example/invoicedrop"
+url="https://github.com/majorkingleo/InvoiceDrop"
 license=('GPL-3.0-or-later')
 depends=(
     'qt6-base'

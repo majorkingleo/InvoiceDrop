@@ -35,6 +35,10 @@
         "**/build-*/**": true
     },
     "chat.tools.terminal.autoApprove": {
-        "ctest": true
+        "ctest": true,
+        "journalctl": true,
+        "uniq": true,
+        "qmllint": true,
+        "and": true
     }
 }

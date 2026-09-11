@@ -45,7 +45,7 @@ is evidence of. Three rules were followed while writing:
 
 What it does not mean is that any of this is right because it compiles. Nobody has
 read the code line by line, and an assistant is very good at producing something
-that merely looks considered. The tests are the guard: seven suites, six of which
+that merely looks considered. The tests are the guard: eight suites, seven of which
 need neither a model nor a network and finish in about five seconds
 (`ctest --test-dir build -E bills`). Where the reasoning is checkable it is
 written down in `docs/architecture.md`, so it can be argued with.
@@ -346,7 +346,7 @@ invoicedrop *.pdf; and echo "alle gelesen"
 |--------|--------|
 | `--inbox DIR` | folder to watch, default `~/.local/share/invoicedrop/inbox` |
 | `--once` | read the inbox and exit instead of watching |
-| `--no-notify` | send no desktop notifications |
+| `--no-notify` | send no desktop notification for this run, whether the daemon is watching or merely reading these files |
 
 ### OCR tuning
 
@@ -439,8 +439,26 @@ plasmawindowed com.github.invoicedrop    # watch for errors in the terminal
 ```
 
 Settings are available in the widget's own configuration dialog: the binary path,
-the model, how many bills to keep in the list, and whether a document should be
-moved into the archive once it was read.
+the model, how many bills to keep in the list, whether a document should be moved
+into the archive once it was read, and whether a finished document should raise a
+desktop notification.
+
+### The notification switch
+
+On by default, because a widget in the panel is easy to miss and the toast is how
+a finished document announces itself. Turn it off and the result appears in the
+widget alone.
+
+The switch cannot simply suppress a toast locally: the widget runs the CLI, the
+CLI hands the read to the daemon and prints the answer the daemon returns, and the
+daemon is what raises the notification. So the widget passes `--no-notify`, the
+flag travels to the daemon as the second argument of the `Analyze` call, and the
+daemon skips the toast for that read. Reading locally instead would also be quiet,
+but it would pay a model load on every drop, which is the cost the daemon exists
+to avoid.
+
+The inbox watcher is not affected. A file that lands in the watched folder is
+still announced, because nothing else is going to say so.
 
 ### Reloading the widget
 
@@ -477,6 +495,11 @@ invoicedrop daemon --inbox ~/Belege   # watch somewhere else
 
 Drop a file into the folder and it is read, stored, announced with a desktop
 notification, and printed as JSON on stdout. `--no-notify` silences the toast.
+
+The widget asks for the same silence when its notification switch is off. That
+flag has to travel with the request, because the process raising the toast is not
+the one the widget started: the CLI hands the read to the daemon and prints what
+comes back. See [the notification switch](#the-notification-switch).
 
 While the daemon runs, the CLI hands its work over instead of reading locally,
 because the daemon already has the model resident:
@@ -676,7 +699,7 @@ src/                    the binary
   ollama.{h,cpp}        the HTTP client
   store.{h,cpp}         SQLite: documents, bills, the settings fingerprint
   extract/              document reading: MuPDF, Leptonica, Tesseract
-tests/                  seven suites, run with ctest
+tests/                  eight suites, run with ctest
   testdata/             real invoices plus their expected results
 docs/architecture.md    how it works and why
 docs/plan.md            what each phase delivered

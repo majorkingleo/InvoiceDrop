@@ -47,7 +47,11 @@ public:
 
     /// Analyses a list of paths and returns one JSON object per bill, newline
     /// separated. This is what the DBus method and the delegating CLI return.
-    QString analyzePaths(const QStringList &paths);
+    ///
+    /// `announce` raises a desktop notification per file. The caller decides,
+    /// because the widget draws the answer itself and a toast about it is a
+    /// second copy of what is already on screen.
+    QString analyzePaths(const QStringList &paths, bool announce = true);
 
     /// Recent bills as newline separated JSON.
     QString historyJson(int limit) const;

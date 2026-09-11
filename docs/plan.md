@@ -430,6 +430,13 @@ reply it parses and the labels it renders are all checked; the gesture is not.
 Verified by hand instead with `plasmawindowed com.github.invoicedrop`, which
 loads the package with no QML warnings.
 
+**What that verification could not have caught.** `plasmawindowed` loads
+`contents/ui/main.qml` and nothing else, and the settings dialog was never opened.
+So the phase shipped a widget whose configuration page did not exist — no error,
+no warning, nothing to see in the log — and the sentence above was true about a
+drop target and untrue about the widget. The cause and the check that now guards
+it are in *The widget's notification switch* below.
+
 **A changed widget needs the shell restarted, not the session.** Plasma compiles
 an applet's QML once and holds it, so editing `main.qml` and reinstalling changes
 nothing on screen, and there is no per-applet reload to ask for. On Plasma 6 the
@@ -612,6 +619,73 @@ Found after the phase was called done, by using it:
 
 ---
 
+## The widget's notification switch
+
+Dropping a file into the widget runs the CLI, the CLI hands the read to the
+running daemon, and the daemon announced the result on the way back. The widget
+draws the same result itself, so the toast was a second copy of what was already
+on screen, and nothing the widget passed could prevent it: the bus-started daemon
+takes no arguments from the caller that woke it.
+
+Delivered:
+
+- `notify` in `contents/config/main.xml`, default on, with a checkbox in the
+  settings dialog. The widget passes `--no-notify` when it is off, and reads an
+  absent key as "on" so a configuration written before the setting existed does
+  not silently start swallowing toasts.
+- The settings dialog itself, which turned out never to have worked. See below.
+- The flag now has to reach the daemon, so `Analyze` is `as, b -> s` and
+  `Daemon::analyzePaths` takes `announce`. The inbox watcher is untouched: a file
+  that lands in the watched folder is still announced, because nothing else will.
+- New cases in `tst_plasmoid.qml` for the flag in the built command, and a new
+  `plasmoid-config` suite for the package's structure.
+
+What this found:
+
+- **The widget had no settings page at all, and had never had one.** Opening the
+  dialog showed *Tastaturkurzbefehle* and *Über* and nothing else. The cause is in
+  `contents/config/config.qml`: Plasma 6 reads the dialog pages from a
+  `ConfigModel` that lists `ConfigCategory` entries, and that file was a plain
+  `Kirigami.FormLayout`. A page where a model is expected is not an error Plasma
+  reports — it loads cleanly, contributes no category, and the dialog silently has
+  one page fewer. Nothing in a build, a lint or the session log said a word. It
+  was found only because a setting was added and could not be reached.
+- **The `source` of a `ConfigCategory` is resolved against `contents/ui/`, not
+  against the folder the model lives in.** `contents/config/config.qml` names
+  `config/ConfigGeneral.qml`, and the file is at
+  `contents/ui/config/ConfigGeneral.qml`. Checked against the installed system
+  widgets, which do the same thing in both spellings.
+- **`i18n` is the only thing missing outside Plasma.** Loading the new
+  `config.qml` under `qmlscene6` gets as far as `ReferenceError: i18n is not
+  defined`, which proves the file parses and that `org.kde.plasma.configuration`
+  resolves, and proves nothing about whether Plasma shows the page.
+- **Both failure modes are silent, so they are now checked by a test.**
+  `tests/check_plasmoid_config.cmake` runs as the `plasmoid-config` suite: it
+  requires the `ConfigModel` root, every `source` to exist, and the `cfg_` aliases
+  in the pages to be exactly the entry names in `main.xml` in both directions — a
+  missing alias is a setting nobody can reach, an extra one is a control that
+  edits nothing. The check was itself checked, against three deliberately broken
+  copies of the package; it failed on each with the message it exists for. A test
+  that passes while testing nothing had already happened once in this project.
+- **The flag could have been honoured by not delegating, and that would have
+  been the wrong kind of quiet.** `--no-notify` suppressing the hand-over, not
+  the toast, would have made the widget silent and slow, and hidden a model load
+  behind a setting that says nothing about speed. The preference belongs to the
+  daemon, so it is the daemon that has to hear about it.
+- **Two arguments where one used to be is a breaking change on the bus**, because
+  D-Bus matches a method by its full signature. Verified with `gdbus`: the
+  two-argument call answers, the one-argument call comes back
+  `UnknownMethod ... (signature 'as')`. The CLI retries the old form when the new
+  one fails and a notification was wanted, so a daemon that is one version behind
+  keeps working at full speed. When silence was requested there is no retry, since
+  the old form would announce the file the caller asked it not to announce.
+- **The toast was measured, not assumed.** `dbus-monitor` on
+  `org.freedesktop.Notifications` counted one `Notify` call across three runs: one
+  without `--no-notify`, two with it. Suppressing a notification is easy to get
+  wrong in a way that still looks right on screen.
+
+---
+
 ## Build commands
 
 Packages:
@@ -681,6 +755,11 @@ from the build tree.
 * `tst_paths` — reading `paths.cpp`: a relative path becomes absolute, an existing
   one is canonicalised, a missing one is still made absolute so the error can name
   it, and the data directory is not doubled.
+* `plasmoid-config` — the widget package's structure, checked by a CMake script
+  because there is no code to run, only files to read: that
+  `contents/config/config.qml` is a `ConfigModel`, that every `source` it names
+  exists under `contents/ui/`, and that the `cfg_` aliases and the entries in
+  `main.xml` are the same set in both directions.
 * `tst_bills` — an integration suite. It needs Ollama and skips itself without
   one, and it is the only suite that can be red for a model's reasons rather than
   the code's.

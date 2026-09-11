@@ -3,7 +3,7 @@
     "KPlugin": {
         "Authors": [
             {
-                "Name": "Martin"
+                "Name": "Martin Oberzalek"
             }
         ],
         "Category": "Utilities",
@@ -15,7 +15,7 @@
         "Name": "InvoiceDrop",
         "Name[de]": "InvoiceDrop",
         "Version": "0.1.0",
-        "Website": "https://github.com/example/invoicedrop"
+        "Website": "https:///majorkingleo/InvoiceDrop"
     },
     "X-Plasma-API-Minimum-Version": "6.0"
 }

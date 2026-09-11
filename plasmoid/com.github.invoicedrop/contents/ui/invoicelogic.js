@@ -14,12 +14,18 @@ function quote(value) {
 /// The CLI answers in JSON, one object per bill per line, and hands the work to
 /// a running daemon by itself, so the same command is fast when a daemon is up
 /// and correct when none is.
-function buildCommand(cliPath, model, archiveAfterReading, path) {
+///
+/// `notify` is passed on rather than acted on here: the toast is raised by
+/// whichever process reads the document, and when a daemon does that, this flag
+/// is the only thing that can silence it.
+function buildCommand(cliPath, model, archiveAfterReading, notify, path) {
     const parts = [quote(cliPath), "--json"];
     if (model)
         parts.push("--model", quote(model));
     if (archiveAfterReading)
         parts.push("--move");
+    if (!notify)
+        parts.push("--no-notify");
     parts.push(quote(path));
     return parts.join(" ");
 }

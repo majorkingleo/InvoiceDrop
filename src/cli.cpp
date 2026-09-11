@@ -509,7 +509,9 @@ int runCli(const QStringList &arguments)
         QStringLiteral("With `daemon`: read the inbox and exit instead of watching."));
     const QCommandLineOption noNotify(
         QStringLiteral("no-notify"),
-        QStringLiteral("With `daemon`: send no desktop notifications."));
+        QStringLiteral("Send no desktop notification for this run. With `daemon` the watcher "
+                       "stays silent, and a running daemon that reads the files for this "
+                       "command stays silent too."));
     const QCommandLineOption local(
         QStringLiteral("local"),
         QStringLiteral("Read the document here instead of asking a running daemon to do it."));
@@ -688,8 +690,21 @@ int runCli(const QStringList &arguments)
                 QDBusInterface control(service, QString::fromLatin1(Daemon::kObjectPath),
                                        QStringLiteral("org.kde.invoicedrop.Control"), bus);
                 if (control.isValid()) {
-                    const QDBusReply<QString> reply =
-                        control.call(QStringLiteral("Analyze"), files);
+                    // The daemon raises the toast, so whether one is wanted has
+                    // to travel with the call. `--no-notify` does, which is what
+                    // lets the widget ask for silence without giving up the warm
+                    // model by reading locally instead.
+                    const bool wanted = !parser.isSet(noNotify);
+                    QDBusReply<QString> reply =
+                        control.call(QStringLiteral("Analyze"), files, wanted);
+                    if (!reply.isValid() && wanted) {
+                        // A daemon from before the second argument existed
+                        // exports `Analyze(as)` only. Retry rather than fall back
+                        // to a local read, which would pay a model load for the
+                        // whole session of a daemon that is merely one version
+                        // behind.
+                        reply = control.call(QStringLiteral("Analyze"), files);
+                    }
                     if (reply.isValid()) {
                         const int failures = printDelegatedResult(reply.value(), asJson);
                         return failures == 0 ? kExitOk : kExitFailure;

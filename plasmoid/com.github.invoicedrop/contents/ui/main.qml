@@ -12,6 +12,10 @@ PlasmoidItem {
     readonly property string cliPath: Plasmoid.configuration.cliPath || "invoicedrop"
     readonly property int historyLimit: Plasmoid.configuration.historyLimit || 8
 
+    /// An unset key has to mean "on", not "off": a configuration written before
+    /// this setting existed must not silently start swallowing notifications.
+    readonly property bool notify: Plasmoid.configuration.notify !== false
+
     /// Bills, newest first. One entry per page, because a bill is a page.
     property var bills: []
     property int running: 0
@@ -34,7 +38,8 @@ PlasmoidItem {
             return;
 
         const command = Logic.buildCommand(cliPath, Plasmoid.configuration.model,
-                                           Plasmoid.configuration.archiveAfterReading, path);
+                                           Plasmoid.configuration.archiveAfterReading,
+                                           notify, path);
 
         running += 1;
         statusText = i18n("Lese %1 …", baseName(path));

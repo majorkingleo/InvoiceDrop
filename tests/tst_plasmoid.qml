@@ -47,16 +47,25 @@ Item {
 
         // ------------------------------------------------------- the command
         check("command without a model",
-              Logic.buildCommand("invoicedrop", "", false, "/tmp/a.pdf"),
+              Logic.buildCommand("invoicedrop", "", false, true, "/tmp/a.pdf"),
               "'invoicedrop' --json '/tmp/a.pdf'");
 
         check("command with a model and a space in the path",
-              Logic.buildCommand("/opt/invoicedrop", "gemma4:latest", false, "/tmp/mein beleg.pdf"),
+              Logic.buildCommand("/opt/invoicedrop", "gemma4:latest", false, true,
+                                 "/tmp/mein beleg.pdf"),
               "'/opt/invoicedrop' --json --model 'gemma4:latest' '/tmp/mein beleg.pdf'");
 
         check("command with archiving",
-              Logic.buildCommand("invoicedrop", "", true, "/tmp/a.pdf"),
+              Logic.buildCommand("invoicedrop", "", true, true, "/tmp/a.pdf"),
               "'invoicedrop' --json --move '/tmp/a.pdf'");
+
+        check("command with notifications off",
+              Logic.buildCommand("invoicedrop", "", false, false, "/tmp/a.pdf"),
+              "'invoicedrop' --json --no-notify '/tmp/a.pdf'");
+
+        check("archiving and silence together",
+              Logic.buildCommand("invoicedrop", "", true, false, "/tmp/a.pdf"),
+              "'invoicedrop' --json --move --no-notify '/tmp/a.pdf'");
 
         // ---------------------------------------------------- reading a reply
         const one = Logic.parseBills('{"bill":1,"vendor":"HOFER","gross_total":11.91}\n');
@@ -89,7 +98,7 @@ Item {
         check("taken once only",
               Logic.takePath("'invoicedrop' --json '/tmp/mein beleg.pdf'"), "");
 
-        const quoted = Logic.buildCommand("invoicedrop", "", false, "/tmp/it's.pdf");
+        const quoted = Logic.buildCommand("invoicedrop", "", false, true, "/tmp/it's.pdf");
         Logic.rememberPath(quoted, "/tmp/it's.pdf");
         check("path with an apostrophe survives", Logic.takePath(quoted), "/tmp/it's.pdf");
 

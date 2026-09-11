@@ -79,6 +79,16 @@ target_link_libraries(tst_paths
 
 add_test(NAME paths COMMAND tst_paths)
 
+# The plasmoid package's structure, which Plasma never complains about: a
+# config.qml that is not a ConfigModel costs the entire settings dialog and logs
+# nothing, and a cfg_ alias that does not match an entry in main.xml leaves an
+# empty row behind and saves nothing. Checked by a script rather than by a test
+# binary because there is no code to run, only files to read.
+add_test(NAME plasmoid-config
+         COMMAND ${CMAKE_COMMAND}
+                 -DPACKAGE_DIR=${CMAKE_SOURCE_DIR}/plasmoid/com.github.invoicedrop
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/check_plasmoid_config.cmake)
+
 qt_add_executable(tst_daemon tst_daemon.cpp)
 
 target_link_libraries(tst_daemon
