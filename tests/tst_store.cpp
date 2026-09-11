@@ -59,6 +59,7 @@ private slots:
     void rejectsAStaleFingerprint();
     void replacesBillsOnASecondWrite();
     void forgetsADocument();
+    void clearsEverything();
     void survivesReopening();
 
 private:
@@ -200,6 +201,39 @@ void TestStore::forgetsADocument()
     QVERIFY(store.forget(QStringLiteral("hash-d")));
     QVERIFY(!store.find(QStringLiteral("hash-d"), fingerprint).has_value());
     QCOMPARE(store.billCount(), 0);
+}
+
+void TestStore::clearsEverything()
+{
+    Store store(m_path);
+    QVERIFY(store.isOpen());
+
+    const QString fingerprint = Store::fingerprint(baseOptions(), QStringLiteral("gemma4:latest"));
+    QVector<BillResult> bills;
+    bills.append(makeBill(1, QStringLiteral("HOFER"), 11.91, QStringLiteral("2025-07-09")));
+
+    QVERIFY(store.save(QStringLiteral("hash-f"), fingerprint,
+                       makeDocument(QStringLiteral("/tmp/f.pdf")), bills,
+                       QStringLiteral("gemma4:latest")));
+    QCOMPARE(store.billCount(), 1);
+    QCOMPARE(store.documents().size(), 1);
+
+    QVERIFY(store.clear());
+
+    // Both tables have to go. A bill whose document is gone would still be
+    // listed by `history`, which joins on the document table and would drop it,
+    // while `billCount` would keep counting it: the two numbers would disagree.
+    QCOMPARE(store.billCount(), 0);
+    QVERIFY(store.documents().isEmpty());
+    QVERIFY(store.recent(5).isEmpty());
+    QVERIFY(!store.find(QStringLiteral("hash-f"), fingerprint).has_value());
+
+    // The schema outlives the rows, so the handle that just emptied the store is
+    // the same one the next read writes through.
+    QVERIFY(store.save(QStringLiteral("hash-g"), fingerprint,
+                       makeDocument(QStringLiteral("/tmp/g.pdf")), bills,
+                       QStringLiteral("gemma4:latest")));
+    QCOMPARE(store.billCount(), 1);
 }
 
 void TestStore::survivesReopening()

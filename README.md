@@ -339,6 +339,7 @@ invoicedrop *.pdf; and echo "alle gelesen"
 | `--move` | move the original into the archive once every bill was read |
 | `--limit N` | how many bills `history` lists, default 20 |
 | `--local` | read here instead of asking a running daemon to do it |
+| `--wipe` | delete every stored bill, the archive and the inbox. Takes no files |
 
 ### Daemon
 
@@ -576,6 +577,26 @@ invoicedrop --move ~/Rechnungen/*.pdf
 
 Originals land in `~/.local/share/invoicedrop/archive/`. A file is only moved
 when every one of its pages was read.
+
+To start over:
+
+```fish
+invoicedrop --wipe
+```
+
+```
+wiped 42 bill(s) in 12 document(s) from /home/u/.local/share/invoicedrop/invoicedrop.db
+wiped 7 file(s) from /home/u/.local/share/invoicedrop/archive
+wiped 3 file(s) from /home/u/.local/share/invoicedrop/inbox
+```
+
+Three places are emptied, and the last two hold documents rather than anything
+InvoiceDrop derived from them: the archive keeps the originals `--move` put
+aside, and the inbox keeps what the daemon has not read yet. Leaving either
+behind would mean deleted bills came back on the next daemon start. The
+directories themselves stay, because the daemon watches them. `--wipe` takes no
+files, and it does not touch `--inbox`, which names any folder the reader keeps
+documents in.
 
 ## How a document is read
 

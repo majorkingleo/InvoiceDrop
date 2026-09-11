@@ -329,6 +329,73 @@ int runHistory(Store &store, int limit, bool asJson){
     return kExitOk;
 }
 
+/// `invoicedrop --wipe`. Removes what the tool has collected.
+///
+/// Three places are emptied, and for different reasons. The database holds the
+/// bills and the cached reads, and is what `history` prints. The archive holds
+/// the originals `--move` put aside, which for a document that was only ever
+/// dropped once is the only copy left. The inbox holds what the daemon has not
+/// read yet, and leaving it behind would mean the data came back on the next
+/// daemon start, which is the opposite of what a wipe is asked for.
+///
+/// Only the paths InvoiceDrop resolves on its own are touched. `--inbox` names a
+/// directory the daemon happens to watch, and that can be any folder the reader
+/// keeps documents in, so `--wipe --inbox ~/Belege` must not delete `~/Belege`.
+/// The directories themselves stay, because the daemon watches them and a
+/// missing inbox is a different problem than an empty one.
+int runWipe(Store &store)
+{
+    const int documents = store.documents().size();
+    const int bills = store.billCount();
+    const bool cleared = store.clear();
+
+    int failures = 0;
+
+    /// Empties a directory without removing it, and returns how many entries
+    /// went. Entry by entry rather than `removeRecursively()` on the folder, so
+    /// one unreadable file does not abandon the rest.
+    const auto emptyDirectory = [&failures](const QString &path) {
+        QDir directory(path);
+        if (!directory.exists())
+            return 0;
+
+        int removed = 0;
+        const QFileInfoList entries = directory.entryInfoList(
+            QDir::NoDotAndDotDot | QDir::Files | QDir::Dirs | QDir::Hidden | QDir::System);
+        for (const QFileInfo &entry : entries) {
+            const bool ok = entry.isDir() ? QDir(entry.absoluteFilePath()).removeRecursively()
+                                          : QFile::remove(entry.absoluteFilePath());
+            if (ok) {
+                ++removed;
+            } else {
+                ++failures;
+                err() << "cannot remove " << entry.absoluteFilePath() << Qt::endl;
+            }
+        }
+        return removed;
+    };
+
+    const QString archive = archiveDirectory();
+    const int archived = emptyDirectory(archive);
+    const QString inbox = QDir(Paths::dataDir()).filePath(QStringLiteral("inbox"));
+    const int waiting = emptyDirectory(inbox);
+
+    if (!cleared) {
+        err() << "cannot empty " << store.databasePath() << ": " << store.error() << Qt::endl;
+        err().flush();
+        return kExitFailure;
+    }
+
+    out() << "wiped " << bills << " bill(s) in " << documents << " document(s) from "
+          << store.databasePath() << Qt::endl;
+    out() << "wiped " << archived << " file(s) from " << archive << Qt::endl;
+    out() << "wiped " << waiting << " file(s) from " << inbox << Qt::endl;
+    out().flush();
+    err().flush();
+
+    return failures == 0 ? kExitOk : kExitFailure;
+}
+
 void printAnalysisLine(const QString &label, const Invoice &invoice)
 {
     const QString amount = invoice.grossTotal.has_value()
@@ -533,6 +600,10 @@ int runCli(const QStringList &arguments)
         QStringLiteral("dump-images"),
         QStringLiteral("Write the rasterised pages into this directory, for inspection."),
         QStringLiteral("dir"));
+    const QCommandLineOption wipe(
+        QStringLiteral("wipe"),
+        QStringLiteral("Delete every stored bill, the archive and the inbox. Takes no files. "
+                       "This removes documents, not just what was read out of them."));
 
     parser.addOption(extractOnly);
     parser.addOption(textOnly);
@@ -561,6 +632,7 @@ int runCli(const QStringList &arguments)
     parser.addOption(noNormalise);
     parser.addOption(ocr);
     parser.addOption(dumpImages);
+    parser.addOption(wipe);
     parser.addPositionalArgument(QStringLiteral("files"),
                                  QStringLiteral("Invoice files to read."),
                                  QStringLiteral("[files...]"));
@@ -582,21 +654,33 @@ int runCli(const QStringList &arguments)
     // because there is no such file to canonicalise.
     const QStringList positional = parser.positionalArguments();
 
-    if (positional.isEmpty()) {
+    // `--wipe` is the one thing that names nothing and still has work to do, so
+    // it is exempt from the file check. It is a flag rather than a subcommand
+    // because it is a property of the store that every other command shares:
+    // `--wipe` next to `history`, `doctor` or a file would be two jobs in one
+    // command, and which one came first would be guesswork.
+    if (positional.isEmpty() && !parser.isSet(wipe)) {
         err() << "no input files given" << Qt::endl << Qt::endl;
         err() << parser.helpText();
         err().flush();
         return kExitUsage;
     }
 
+    if (parser.isSet(wipe) && !positional.isEmpty()) {
+        err() << "--wipe takes no files" << Qt::endl;
+        err().flush();
+        return kExitUsage;
+    }
+
     // `history`, `daemon` and `doctor` are the subcommands. They are recognised
     // as the first positional argument because everything else is a file.
-    const bool historyMode =
-        positional.first() == QStringLiteral("history") && !parser.isSet(extractOnly);
-    const bool daemonMode =
-        positional.first() == QStringLiteral("daemon") && !parser.isSet(extractOnly);
-    const bool doctorMode =
-        positional.first() == QStringLiteral("doctor") && !parser.isSet(extractOnly);
+    //
+    // The list can be empty at this point, for `--wipe`, which names no files:
+    // `positional.first()` on it is an assertion failure, not an empty string.
+    const QString first = positional.isEmpty() ? QString() : positional.first();
+    const bool historyMode = first == QStringLiteral("history") && !parser.isSet(extractOnly);
+    const bool daemonMode = first == QStringLiteral("daemon") && !parser.isSet(extractOnly);
+    const bool doctorMode = first == QStringLiteral("doctor") && !parser.isSet(extractOnly);
 
     const bool subcommand = historyMode || daemonMode || doctorMode;
 
@@ -648,6 +732,12 @@ int runCli(const QStringList &arguments)
         err().flush();
         return kExitFailure;
     }
+
+    // Before the subcommands, because a wipe is not something they do: the store
+    // is emptied once and the run ends, whether the reader also typed `history`
+    // or `doctor`. Those two are rejected above as files next to `--wipe`.
+    if (parser.isSet(wipe))
+        return runWipe(store);
 
     if (historyMode)
         return runHistory(store, parser.value(limit).toInt(), asJson);

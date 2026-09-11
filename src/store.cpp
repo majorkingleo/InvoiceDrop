@@ -358,4 +358,31 @@ QVector<QString> Store::documents() const
     return result;
 }
 
+bool Store::clear()
+{
+    if (!m_open)
+        return false;
+
+    // `bills` is named first even though the foreign key would take it along.
+    // `PRAGMA foreign_keys` is per connection and set in createSchema, so a
+    // later change that reorders that setup would silently orphan every row
+    // here rather than fail.
+    QSqlQuery query(QSqlDatabase::database(m_connection));
+    if (!query.exec(QStringLiteral("DELETE FROM bills"))) {
+        m_error = query.lastError().text();
+        return false;
+    }
+    if (!query.exec(QStringLiteral("DELETE FROM documents"))) {
+        m_error = query.lastError().text();
+        return false;
+    }
+
+    // Deleting rows only marks their pages free, so the vendor names and the
+    // amounts stay readable in the file until something reuses them. VACUUM
+    // writes them out of it. A failure here is not worth reporting: the rows are
+    // gone either way, and the file shrinks on the next wipe.
+    query.exec(QStringLiteral("VACUUM"));
+    return true;
+}
+
 } // namespace InvoiceDrop

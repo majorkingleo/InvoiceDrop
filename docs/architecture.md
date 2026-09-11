@@ -219,6 +219,7 @@ scripting and for the plasmoid.
 | `--limit N` | how many bills `history` lists |
 | `--local` | read here instead of asking a running daemon |
 | `--verbose` | extraction notes and timings on stderr |
+| `--wipe` | delete every bill, the archive and the inbox; takes no files |
 
 `-v` is not free: `QCommandLineParser` claims it for `--version`, so the verbose
 flag is long form only.
@@ -250,6 +251,25 @@ model's answers from disk and look like a regression in the new one.
 Lookup happens before the document is opened, because hashing a file is
 milliseconds while rasterising and inferring are seconds. A document row without
 bills is treated as a miss and read again, rather than reported as nothing.
+
+### Starting over
+
+`Store::clear()` empties both tables and vacuums the file, and the schema is left
+in place so the handle that emptied it is the one the next read writes through.
+VACUUM is not decoration: `DELETE` only marks pages free, so the vendor names and
+the amounts stay readable in the file until something reuses them.
+
+`--wipe` is the only command that names no files, which is why it is a flag and
+not a subcommand: the store is not the only thing a reader wants gone. The
+archive holds the originals `--move` set aside, and for a document that was only
+ever dropped once that is the only copy left; the inbox holds what the daemon has
+not read yet, and leaving it behind means the data returns on the next daemon
+start. Both are emptied, but not removed: the daemon watches those directories,
+and a missing inbox is a different problem than an empty one.
+
+`--inbox` is deliberately outside all of this. It names a directory the daemon
+happens to watch, which can be any folder the reader keeps documents in, so
+`--wipe --inbox ~/Belege` must not delete `~/Belege`.
 
 ## Data flow
 

@@ -77,6 +77,14 @@ public:
     /// Every document hash in the store, newest first.
     QVector<QString> documents() const;
 
+    /// Removes every document and every bill, and reclaims the file.
+    ///
+    /// The schema survives, so the same handle keeps working afterwards and the
+    /// next run stores into the same database. Nothing outside the store is
+    /// touched: the archive and the inbox hold files of their own, and they are
+    /// the caller's business.
+    bool clear();
+
 private:
     bool createSchema();
 
