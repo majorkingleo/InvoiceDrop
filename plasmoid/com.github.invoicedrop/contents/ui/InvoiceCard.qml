@@ -14,6 +14,10 @@ Item {
     property var bill: ({})
     property bool showDivider: false
 
+    /// The card has room for four fields and an invoice has twenty, so a click
+    /// opens the bill in full instead of trying to fit more on the row.
+    signal clicked()
+
     readonly property bool failed: bill.status !== "ok"
     readonly property bool unverified: bill.quality_warning !== undefined
 
@@ -25,6 +29,18 @@ Item {
         : (bill.quality_warning !== undefined ? bill.quality_warning : "")
 
     implicitHeight: layout.implicitHeight + Kirigami.Units.smallSpacing * 2
+
+    /// Behind the text, so a hover tints the row and not the label. This is the
+    /// only hint that the row can be clicked, so it is worth the animation.
+    Rectangle {
+        anchors.fill: parent
+        color: Kirigami.Theme.highlightColor
+        opacity: mouse.containsMouse ? 0.12 : 0
+
+        Behavior on opacity {
+            NumberAnimation { duration: Kirigami.Units.shortDuration }
+        }
+    }
 
     ColumnLayout {
         id: layout
@@ -94,6 +110,17 @@ Item {
         height: 1
         color: Kirigami.Theme.textColor
         opacity: 0.15
+    }
+
+    /// Last, so it sits over the row and over the divider. It does not prevent
+    /// stealing, because a drag across the list has to stay a scroll.
+    MouseArea {
+        id: mouse
+
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: card.clicked()
     }
 
     function label() {

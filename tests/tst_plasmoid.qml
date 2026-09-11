@@ -182,6 +182,14 @@ Item {
         check("a sum with nothing in it is not complete", noAmount[1].complete, false);
         check("a sum with nothing in it is empty", noAmount[1].money, "");
 
+        // The same sum as a bare number, which is what a copy puts on the
+        // clipboard when the settings ask for no currency. A file that mixes
+        // currencies has none to give — `10,00 + 5,00` is not money — so the copy
+        // keeps the codes there instead of printing a number that means nothing.
+        check("a single currency sum has a bare form", tankenSums[2].amount, "177,76");
+        check("a mixed currency sum has no bare form", mixedCurrency[1].amount, "");
+        check("a sum with nothing in it has no bare form", noAmount[1].amount, "");
+
         check("no bills is no marks", Logic.subtotalsFor([], german).length, 0);
 
         // A run is broken by the file, not by the bill number: the same name on
@@ -193,6 +201,136 @@ Item {
         ], german);
         check("the same file twice is two runs",
               [twice[0], twice[1], twice[2]], [null, null, null]);
+
+        // ------------------------------------------------------------ one bill
+        check("an amount for the desktop locale",
+              Logic.moneyText(11.91, "EUR", german), "11,91 EUR");
+        check("an amount without a currency",
+              Logic.moneyText(11.91, "", german), "11,91");
+        // The same number without the code, for the settings that ask a copy for
+        // the number alone.
+        check("a bare amount for the desktop locale",
+              Logic.bareMoneyText(21.35, german), "21,35");
+        check("a bare amount rounds like the labelled one",
+              Logic.bareMoneyText(179.764, german), "179,76");
+
+        check("a space in a path becomes a URL",
+              Logic.fileUrl("/tmp/mein beleg.pdf"), "file:///tmp/mein%20beleg.pdf");
+        check("a hash does not end the URL early",
+              Logic.fileUrl("/tmp/a#b.pdf"), "file:///tmp/a%23b.pdf");
+        check("an empty path makes no URL", Logic.fileUrl(""), "");
+        check("an absent path makes no URL", Logic.fileUrl(undefined), "");
+
+        const receipt = {
+            path: "/tmp/belege/tanken.pdf",
+            file: "tanken.pdf",
+            bill: 1,
+            bill_count: 1,
+            status: "ok",
+            gross_total: 21.35,
+            net_total: null,
+            currency: "EUR",
+            vendor: "Tank Roth GmbH",
+            invoice_number: "1702012570",
+            date: "2022-07-27",
+            due_date: "",
+            iban: "",
+            has_text_layer: false,
+            extract_ms: 12,
+            notes: ["answered from the cache", "second note"]
+        };
+
+        const lines = Logic.billText(receipt, german).split("\n");
+        check("the file line comes first", lines[0], "Datei: tanken.pdf");
+        check("the path is shown when it adds something", lines[1],
+              "Pfad: /tmp/belege/tanken.pdf");
+        check("the vendor is labelled and there",
+              lines.indexOf("Aussteller: Tank Roth GmbH") > 1, true);
+        check("the amount is formatted for the locale",
+              lines.indexOf("Betrag: 21,35 EUR") > 1, true);
+        check("an empty value gets no line at all", lines.indexOf("IBAN: "), -1);
+        check("a null value gets no line at all", lines.indexOf("Netto: "), -1);
+        check("a false flag is shown rather than dropped",
+              lines.indexOf("Textlayer: nein") > 1, true);
+        check("every note gets its own line",
+              lines.indexOf("Notiz: second note") > 1, true);
+        check("one line per note, not a joined one",
+              lines.filter(function (line) { return line.indexOf("Notiz:") === 0; }).length, 2);
+
+        // A key the widget has never heard of is shown, not dropped. That is the
+        // whole reason this block is built from the reply instead of from a list
+        // of fields somebody has to remember to extend.
+        const extended = {
+            path: "/tmp/a.pdf", file: "a.pdf", bill: 1, bill_count: 1,
+            status: "ok", gross_total: 1, currency: "EUR",
+            some_new_field: "hello"
+        };
+        check("an unknown field still turns up",
+              Logic.billText(extended, german).split("\n")
+                   .indexOf("some_new_field: hello") > 0, true);
+
+        const failedBill = {
+            path: "/tmp/a.pdf", file: "a.pdf", bill: 1, bill_count: 1,
+            status: "error", error: "the model did not answer",
+            gross_total: null, currency: "EUR"
+        };
+        const failedLines = Logic.billText(failedBill, german).split("\n");
+        check("a failure says so",
+              failedLines.indexOf("Fehler: the model did not answer") > 0, true);
+        check("no amount, no amount line", failedLines.indexOf("Betrag: -"), -1);
+
+        check("nothing to show, nothing shown", Logic.billText(null, german), "");
+
+        // --------------------------------------------------- one block, marked up
+        // The block is grouped into paragraphs, and the group holding the date and
+        // the amount is the one an eye has to find in it.
+        check("the facts are their own paragraph",
+              [lines[lines.indexOf("Aussteller: Tank Roth GmbH") - 1],
+               lines[lines.indexOf("Betrag: 21,35 EUR") + 1]], ["", ""]);
+        check("the paragraph starts after the file block",
+              lines[lines.indexOf("Aussteller: Tank Roth GmbH") - 2], "Status: ok");
+        check("and the technical tail follows it",
+              lines[lines.indexOf("Betrag: 21,35 EUR") + 2], "Textlayer: nein");
+        check("no blank line before the first line", lines[0], "Datei: tanken.pdf");
+
+        // A bill with neither a date nor an amount is one paragraph. A break that
+        // is decided by the group number alone would leave two stray empty lines
+        // where the missing group was.
+        check("an absent group leaves no blank line",
+              Logic.billText(failedBill, german).indexOf("\n\n"), -1);
+
+        const html = Logic.billHtml(receipt, german);
+        check("the date is pulled out of the markup",
+              html.indexOf("<b>Datum: 2022-07-27</b>") > 0, true);
+        check("so is the amount",
+              html.indexOf("<b>Betrag: 21,35 EUR</b>") > 0, true);
+        check("and nothing else is",
+              html.match(/<b>/g).length, 2);
+        // A break, not a paragraph tag: the plain text of a paragraph block has no
+        // empty line in it, and a selection copied out of the field would lose the
+        // break the field shows.
+        check("the paragraph break is a line break",
+              html.indexOf("<br><br>") > 0, true);
+        check("the markup says exactly what the text says",
+              html.replace(/<br>/g, "\n").replace(/<\/?b>/g, ""),
+              Logic.billText(receipt, german));
+        check("nothing to show, no markup shown", Logic.billHtml(null, german), "");
+
+        // A value is data, not markup. A vendor with a `&` or a `<` in it is what
+        // this exists for: unescaped, the field shows a string the CLI never sent.
+        check("ampersand first, then the brackets",
+              Logic.escapeHtml("<a & b>"), "&lt;a &amp; b&gt;");
+
+        const sharp = {
+            path: "/tmp/a.pdf", file: "a.pdf", bill: 1, bill_count: 1, status: "ok",
+            vendor: "Müller & Söhne <GmbH>", gross_total: 1, currency: "EUR"
+        };
+        check("the plain block keeps the vendor as it was read",
+              Logic.billText(sharp, german)
+                   .indexOf("Aussteller: Müller & Söhne <GmbH>") > 0, true);
+        check("the markup escapes it instead of reading it",
+              Logic.billHtml(sharp, german)
+                   .indexOf("Aussteller: Müller &amp; Söhne &lt;GmbH&gt;") > 0, true);
 
         console.log(harness.failures === 0 ? "ALL PASSED"
                                            : (harness.failures + " CHECK(S) FAILED"));

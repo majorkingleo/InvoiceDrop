@@ -687,6 +687,98 @@ What this found:
 
 ---
 
+## The detail view, and two copies
+
+A card has room for four fields and an invoice has twenty, and the number that
+has to be typed into a bookkeeping program is rarely one of the four the card
+chose. So a click on a card opens the whole block the CLI reported, in one
+selectable field, with the amount and the document one button away. The sum row
+under a file took the same idea from the other end: it is a single number, so a
+click on it puts that number on the clipboard.
+
+Delivered:
+
+- `contents/ui/BillDetails.qml` — the block in a read-only field, `Betrag
+  kopieren` and `Öffnen`, and a `Zurück` that closes it. The field is selectable,
+  so any single value can be taken out by hand.
+- `contents/ui/Clipboard.qml` — the one hidden text item every copy in the widget
+  goes through.
+- `invoicelogic.js`: `billLines` builds the block once, `billText` and `billHtml`
+  render it, `escapeHtml` protects the values in the markup.
+- `FileSum.qml`: the row tints under the pointer and copies the sum on click. The
+  confirmation takes the count's place for a moment, because the row is one line
+  high and has nowhere else to put it.
+- Two settings, `copyWithoutCurrency` (default off) and `showCopyNotice` (default
+  on), with a checkbox each. The first is what a copy puts on the clipboard, the
+  second is whether the widget says that it did — a form with its own currency
+  field is the reason for the first, and taste is the reason for the second.
+- New cases in `tst_plasmoid.qml`, including the round trip from the markup back
+  to the plain text.
+
+What this found:
+
+- **QML has no clipboard.** The only writer is `TextEdit.copy()`, and it copies
+  that item's own selection, so copying anything means filling a hidden text item
+  and selecting it. Two of those items would have been the second place to get it
+  wrong, so there is one, and its `copy()` answers false when the text is empty: a
+  sum row with no sum leaves the clipboard as it was instead of replacing it with
+  an empty string and confirming that it did.
+- **A copy that returns true says nothing about what is on the clipboard.** The
+  reader has to paste. A hidden text item that pastes what was copied, run under
+  `qmlscene6` on this machine, answered: a copied amount reads back as
+  `177,76 EUR`; a block of `<br>` joined lines reads back as `a\nb\n\nc`; the same
+  block written as `<p>` paragraphs reads back as `a\nb`. That measurement is why
+  the block is joined with `<br>`: the field shows the break and copies the break,
+  and a paragraph tag would have dropped the empty line on the way out.
+- **`qmlscene6` ignores `Qt.quit()`**, which is already why the plasmoid suite
+  reports through its output instead of its exit code. This time it cost a
+  terminal that looked hung and looked like a shell problem. It is not: the probe
+  has to be run under `timeout`, and the tool's own message is invisible because
+  the process never reaches it.
+- **The block is built once and rendered twice, and a test says so.** `billText`
+  and `billHtml` share `billLines`, and `tst_plasmoid.qml` asserts that the markup
+  with its tags stripped is character for character the plain text. Two builders
+  would have drifted within a phase.
+- **A value is data, not markup, and the field is markup.** A vendor called
+  `Müller & Söhne <GmbH>` is the case: escaped, the field shows what the CLI sent;
+  unescaped, it shows something else and says nothing about why. `escapeHtml` runs
+  and then the bold is wrapped around the result, in that order.
+- **A bare sum only exists when the file has one currency.** `10,00 + 5,00` is not
+  money, so `totalFor` refuses to produce the bare form of a mixed sum and the
+  currency-less copy keeps the codes for that file. Measured by loading both
+  components offscreen with the setting on: the sum row copies `177,76 EUR` by
+  default and `177,76` with the currency dropped, a mixed sum copies
+  `10,00 EUR + 5,00 USD` either way, and the amount button copies `21,35 EUR` and
+  `21,35`. The setting reaches the two copy buttons and not the block: the block is
+  what the CLI reported, and the CLI always reported a currency.
+- **The bare amount is the labelled one without its code**, not a second formatter:
+  `bareMoneyText` is what `moneyText` appends a currency to, so the two round the
+  same way. The suite pins both against `21,35` and `21,35 EUR`, and `179.764`
+  against `179,76`.
+- **The notification default was checked, not changed.** `notify` is `true` in
+  `main.xml` and `main.qml` reads an absent key as on, so a document that is read
+  raises a toast without anyone configuring anything. The new `showCopyNotice`
+  entry is read the same way, for the same reason: a configuration written before
+  it existed must not turn the confirmation off by accident. The two are separate
+  settings on purpose — the toast is about a document that was read, the
+  confirmation is about the clipboard.
+- **`i18n` is only missing under `qmlscene6` when nothing imports Kirigami.**
+  `typeof i18n` is `undefined` in a file that imports QtQuick alone, which is the
+  wall the phase 7 notes ran into and the reason the plasmoid suite checks
+  arithmetic and not wording. But an import of `org.kde.kirigami` brings the
+  function in: instantiating `FileSum.qml` and `BillDetails.qml` offscreen ran
+  both of them, and kf.i18n said nothing worse than that no translation domain is
+  set. The two rows can therefore be loaded outside Plasma; what cannot be done
+  there is the painting and the click.
+
+Not verified, and worth saying so: how it looks. The markup, the sums and the
+clipboard are covered, by the suite and by the paste above, but nothing in this
+repository can assert that the row is drawn where it should be or that a click on
+it lands — no test drives a `MouseArea`, and the widget was only installed and
+the shell restarted.
+
+---
+
 ## Build commands
 
 Packages:

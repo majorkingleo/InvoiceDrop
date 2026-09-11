@@ -16,10 +16,19 @@ PlasmoidItem {
     /// this setting existed must not silently start swallowing notifications.
     readonly property bool notify: Plasmoid.configuration.notify !== false
 
+    /// What a copy puts on the clipboard, and whether the widget says so
+    /// afterwards. Both defaults are the ones the entries in `main.xml` declare,
+    /// and the absent key is read the same way as `notify` is: on.
+    readonly property bool copyWithoutCurrency: Plasmoid.configuration.copyWithoutCurrency === true
+    readonly property bool showCopyNotice: Plasmoid.configuration.showCopyNotice !== false
+
     /// Bills, newest first. One entry per page, because a bill is a page.
     property var bills: []
     property int running: 0
     property string statusText: ""
+
+    /// The bill the detail view is showing, or null. Set by clicking a card.
+    property var openBill: null
 
     /// One entry per bill, `null` except at the last bill of a file, where the
     /// file's total sits. Recomputed whenever the list changes, which is also
@@ -36,6 +45,10 @@ PlasmoidItem {
     function analyse(path) {
         if (!path)
             return;
+
+        // A new document replaces the list the detail view was opened from, so
+        // it closes rather than showing a bill that is no longer in it.
+        openBill = null;
 
         const command = Logic.buildCommand(cliPath, Plasmoid.configuration.model,
                                            Plasmoid.configuration.archiveAfterReading,
@@ -184,6 +197,7 @@ PlasmoidItem {
                         // row.
                         showDivider: index < list.count - 1
                                      && root.subtotals[index] === null
+                        onClicked: root.openBill = modelData
                     }
 
                     FileSum {
@@ -193,6 +207,8 @@ PlasmoidItem {
                         total: root.subtotals[index] !== undefined
                                ? root.subtotals[index]
                                : null
+                        withoutCurrency: root.copyWithoutCurrency
+                        showCopyNotice: root.showCopyNotice
                     }
                 }
             }
@@ -222,6 +238,19 @@ PlasmoidItem {
                 border.width: 2
                 border.color: Kirigami.Theme.highlightColor
             }
+        }
+
+        /// Over everything, including the drop highlight: a bill is open, and
+        /// that is what the popup is about until it is closed. A drop still
+        /// works while it is up, because neither this item nor the list accepts
+        /// drops, so the search for a drop target carries on past them.
+        BillDetails {
+            anchors.fill: parent
+            visible: root.openBill !== null
+            bill: root.openBill
+            withoutCurrency: root.copyWithoutCurrency
+            showCopyNotice: root.showCopyNotice
+            onClosed: root.openBill = null
         }
     }
 }

@@ -27,5 +27,13 @@
             <label>Announce a finished document with a desktop notification</label>
             <default>true</default>
         </entry>
+        <entry name="copyWithoutCurrency" type="Bool">
+            <label>Copy amounts without the currency code</label>
+            <default>false</default>
+        </entry>
+        <entry name="showCopyNotice" type="Bool">
+            <label>Confirm a copy in the widget</label>
+            <default>true</default>
+        </entry>
     </group>
 </kcfg>

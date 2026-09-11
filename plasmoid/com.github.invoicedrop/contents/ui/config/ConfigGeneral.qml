@@ -17,6 +17,8 @@ Kirigami.FormLayout {
     property alias cfg_historyLimit: historyLimitSpin.value
     property alias cfg_archiveAfterReading: archiveCheck.checked
     property alias cfg_notify: notifyCheck.checked
+    property alias cfg_copyWithoutCurrency: copyWithoutCurrencyCheck.checked
+    property alias cfg_showCopyNotice: copyNoticeCheck.checked
 
     QQC.TextField {
         id: cliPathField
@@ -55,5 +57,17 @@ Kirigami.FormLayout {
         id: notifyCheck
         Kirigami.FormData.label: i18n("Notifications:")
         text: i18n("Announce a finished document with a desktop notification")
+    }
+
+    QQC.CheckBox {
+        id: copyWithoutCurrencyCheck
+        Kirigami.FormData.label: i18n("Clipboard:")
+        text: i18n("Copy amounts without the currency code")
+    }
+
+    QQC.CheckBox {
+        id: copyNoticeCheck
+        Kirigami.FormData.label: i18n("Confirmation:")
+        text: i18n("Say in the widget that something was copied")
     }
 }

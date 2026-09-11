@@ -102,18 +102,30 @@ function billAmount(bill) {
     return isNaN(amount) ? null : amount;
 }
 
+/// One amount as a bare number, for the desktop's locale: `179,76`.
+///
+/// No currency code, which is what a form with its own currency field wants.
+/// `moneyText` is this with the code appended.
+function bareMoneyText(amount, locale) {
+    return locale ? Number(amount).toLocaleString(locale, 'f', 2)
+                  : Number(amount).toFixed(2);
+}
+
+/// One amount, formatted for the desktop's locale: `179,76 EUR`. A missing
+/// currency code leaves the bare number rather than a trailing space.
+function moneyText(amount, currency, locale) {
+    const number = bareMoneyText(amount, locale);
+    const code = currency !== undefined && currency !== null ? String(currency) : "";
+    return code.length > 0 ? (number + " " + code) : number;
+}
+
 /// Formats amounts for the desktop's locale. `179,76 EUR`, and for a file that
 /// mixes currencies `179,76 EUR + 12,00 USD`, because adding the two would give
 /// a number that is not money.
 function formatMoney(parts, locale) {
     const rendered = [];
-    for (let i = 0; i < parts.length; ++i) {
-        const amount = parts[i].cents / 100;
-        const number = locale ? Number(amount).toLocaleString(locale, 'f', 2)
-                              : amount.toFixed(2);
-        rendered.push(parts[i].currency.length > 0 ? (number + " " + parts[i].currency)
-                                                   : number);
-    }
+    for (let i = 0; i < parts.length; ++i)
+        rendered.push(moneyText(parts[i].cents / 100, parts[i].currency, locale));
     return rendered.join(" + ");
 }
 
@@ -125,6 +137,11 @@ function formatMoney(parts, locale) {
 /// `expected` comes from the file's own page count, not from the number of bills
 /// on screen, so a list that was cut to the history limit can tell that it is
 /// showing part of a file.
+///
+/// `money` carries the currencies and is what the row shows. `amount` is the same
+/// sum as a bare number, for a clipboard that was asked for no currency, and it is
+/// empty when the file mixes currencies: `10,00 + 5,00` is not money, so there the
+/// copy keeps the codes.
 function totalFor(bills, locale) {
     const parts = [];
     let expected = 0;
@@ -174,7 +191,8 @@ function totalFor(bills, locale) {
         counted: counted,
         failed: failed,
         complete: counted > 0 && failed === 0 && counted >= expected,
-        money: formatMoney(parts, locale)
+        money: formatMoney(parts, locale),
+        amount: parts.length === 1 ? bareMoneyText(parts[0].cents / 100, locale) : ""
     };
 }
 
@@ -210,4 +228,198 @@ function subtotalsFor(bills, locale) {
     closeRun(bills.length - 1);
 
     return marks;
+}
+
+// ------------------------------------------------------------------ one bill
+
+/// A `file://` URL for a path, with every segment escaped.
+///
+/// Real invoices are called `2025-05-Oebb-Rechnung 9864858445.PDF`, so the space
+/// is the common case. Unescaped it usually survives, and a `#` in a name does
+/// not: it ends the URL early and something else is opened, silently. Built from
+/// the path the CLI sent, which is always absolute.
+function fileUrl(path) {
+    if (path === undefined || path === null)
+        return "";
+
+    const text = String(path);
+    if (text.length === 0)
+        return "";
+
+    const segments = text.split("/");
+    for (let i = 0; i < segments.length; ++i)
+        segments[i] = encodeURIComponent(segments[i]);
+    return "file://" + segments.join("/");
+}
+
+/// Escapes the three characters that would otherwise be read as markup.
+///
+/// Only text content is built from a value here, never an attribute, so the two
+/// quote characters are left alone. A vendor called `Müller & Söhne <GmbH>` is
+/// what this exists for: unescaped, everything from the `&` on is a different
+/// string than the one the CLI sent, and the field shows a mangled vendor with
+/// nothing to say why.
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+}
+
+/// The entries with the paragraph breaks added as empty entries between groups.
+///
+/// Twenty `Label: value` lines in a row are a wall, and the group is what the eye
+/// uses to find the date and the amount in it. The break is decided here rather
+/// than in the QML because the field shows the block and copies the block out, and
+/// both have to break the same way — and between two entries that exist, so a
+/// group with nothing in it leaves no stray blank line behind.
+function withBreaks(entries) {
+    const out = [];
+    for (let i = 0; i < entries.length; ++i) {
+        if (i > 0 && entries[i].group !== entries[i - 1].group)
+            out.push({ text: "", group: entries[i].group, strong: false });
+        out.push(entries[i]);
+    }
+    return out;
+}
+
+/// Every value the CLI reported for one bill, as `{ text, group, strong }`.
+///
+/// `group` is the paragraph a line belongs to, `strong` marks the two lines the
+/// detail view draws in bold: the date and the amount, which are what a bill is
+/// copied into a bookkeeping program for.
+///
+/// Three rules: an absent or empty value is left out rather than printed as `-`,
+/// the order is fixed so the same bill always reads the same way, and a key this
+/// function does not know yet is appended at the end, so a field added to the CLI
+/// turns up here without a change.
+///
+/// The labels are literals and not `i18n` calls: this is a `.pragma library`
+/// file, and Plasma injects `i18n` into QML files only. Having the text here is
+/// what makes it testable at all, and a label nobody translated is still better
+/// than a block nobody can check.
+function billLines(bill, locale) {
+    if (!bill)
+        return [];
+
+    // What this is and whether it worked, then who issued it and for how much,
+    // then what only a machine cares about.
+    const head = 0;
+    const facts = 1;
+    const rest = 2;
+
+    const entries = [];
+    const put = function (group, text, strong) {
+        entries.push({ text: text, group: group, strong: strong === true });
+    };
+    const add = function (group, label, value, strong) {
+        if (value === undefined || value === null)
+            return;
+        const text = String(value);
+        if (text.length === 0)
+            return;
+        put(group, label + ": " + text, strong);
+    };
+    const addAmount = function (group, label, value, strong) {
+        if (value === null || value === undefined)
+            return;
+        add(group, label, moneyText(value, bill.currency, locale), strong);
+    };
+    const yesNo = function (value) {
+        if (value === undefined || value === null)
+            return null;
+        return value ? "ja" : "nein";
+    };
+    const milliseconds = function (value) {
+        if (value === undefined || value === null)
+            return null;
+        return value + " ms";
+    };
+
+    add(head, "Datei", describePlace(bill));
+    if (bill.path !== undefined && bill.path !== "" && bill.path !== bill.file)
+        add(head, "Pfad", bill.path);
+    add(head, "Status", bill.status);
+    add(head, "Fehler", bill.error);
+    add(head, "Hinweis", bill.quality_warning);
+
+    add(facts, "Aussteller", bill.vendor);
+    add(facts, "Adresse", bill.vendor_address);
+    add(facts, "Rechnungsnummer", bill.invoice_number);
+    add(facts, "Datum", bill.date, true);
+    add(facts, "Fällig", bill.due_date);
+    addAmount(facts, "Netto", bill.net_total);
+    addAmount(facts, "Steuer", bill.tax_total);
+    addAmount(facts, "Betrag", bill.gross_total, true);
+
+    add(rest, "IBAN", bill.iban);
+    add(rest, "Konfidenz", bill.confidence);
+    add(rest, "Textlayer", yesNo(bill.has_text_layer));
+    add(rest, "Aus dem Cache", yesNo(bill.from_cache));
+    add(rest, "Extrahiert", milliseconds(bill.extract_ms));
+    add(rest, "Modell", milliseconds(bill.inference_ms));
+
+    const notes = bill.notes;
+    if (notes !== undefined && notes !== null && notes.length > 0) {
+        for (let i = 0; i < notes.length; ++i)
+            put(rest, "Notiz: " + notes[i]);
+    }
+
+    // Whatever the CLI added that this function does not know. One line per key,
+    // sorted, so an unknown field is visible rather than dropped.
+    const known = [
+        "file", "path", "bill", "bill_count", "status", "error", "quality_warning",
+        "vendor", "vendor_address", "invoice_number", "date", "due_date",
+        "currency", "net_total", "tax_total", "gross_total", "iban", "confidence",
+        "has_text_layer", "from_cache", "extract_ms", "inference_ms", "notes"
+    ];
+    const unknown = [];
+    for (const key in bill) {
+        if (known.indexOf(key) !== -1)
+            continue;
+        const value = bill[key];
+        if (value === undefined || value === null || value === "")
+            continue;
+        unknown.push(key + ": " + (typeof value === "object" ? JSON.stringify(value)
+                                                             : String(value)));
+    }
+    unknown.sort();
+    for (let i = 0; i < unknown.length; ++i)
+        put(rest, unknown[i]);
+
+    return entries;
+}
+
+/// The block as plain text, one line per value.
+///
+/// What a selection out of the detail field becomes when it is copied, and what
+/// the tests compare against: the amount, the invoice number or the whole block
+/// can be taken out by hand, which is what one does with an invoice, and rarely
+/// with the four fields a card has room for.
+function billText(bill, locale) {
+    const entries = withBreaks(billLines(bill, locale));
+    const lines = [];
+    for (let i = 0; i < entries.length; ++i)
+        lines.push(entries[i].text);
+    return lines.join("\n");
+}
+
+/// The same block as markup: the same lines, the same breaks, the two `strong`
+/// ones in bold.
+///
+/// Joined with `<br>` and not wrapped in paragraphs, because the plain text of a
+/// paragraph block has no empty line in it. A selection copied out of the rich
+/// field would then lose the break the field shows, which is the half of this
+/// that matters when the block is pasted into a form.
+///
+/// Bold is the whole of the emphasis: a colour would have to be a literal in here,
+/// and the theme's colour is not knowable from a `.pragma library` file.
+function billHtml(bill, locale) {
+    const entries = withBreaks(billLines(bill, locale));
+    const parts = [];
+    for (let i = 0; i < entries.length; ++i) {
+        const text = escapeHtml(entries[i].text);
+        parts.push(entries[i].strong ? ("<b>" + text + "</b>") : text);
+    }
+    return parts.join("<br>");
 }
