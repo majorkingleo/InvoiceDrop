@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.kde.invoicedrop
+Exec=@CMAKE_INSTALL_FULL_BINDIR@/invoicedrop daemon
+SystemdService=invoicedrop.service

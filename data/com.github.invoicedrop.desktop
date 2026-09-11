@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=InvoiceDrop
+Name[de]=InvoiceDrop
+GenericName=Invoice reader
+GenericName[de]=Rechnungsleser
+Comment=Check the local setup and show what invoices were read
+Comment[de]=Lokale Einrichtung prüfen und gelesene Rechnungen anzeigen
+Exec=sh -c "invoicedrop doctor; echo; echo 'ENTER zum Schliessen'; read"
+Terminal=true
+Icon=com.github.invoicedrop
+Categories=Office;Finance;
+Keywords=invoice;receipt;bill;ocr;Rechnung;Beleg;
+StartupNotify=false
