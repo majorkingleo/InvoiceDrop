@@ -1,0 +1,20 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Your Name"
+            }
+        ],
+        "Category": "Utilities",
+        "Description": "One line saying what the widget does.",
+        "Description[de]": "Eine Zeile, die sagt, was das Widget tut.",
+        "Icon": "com.example.hello",
+        "Id": "com.example.hello",
+        "License": "MIT",
+        "Name": "Hello",
+        "Name[de]": "Hello",
+        "Version": "0.1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
