@@ -33,8 +33,8 @@ function buildCommand(cliPath, model, archiveAfterReading, notify, path) {
 /// Parses the reply: one JSON object per line, one line per bill.
 ///
 /// Returns `{ bills: [...], broken: n }`, where `broken` counts lines that did
-/// not parse. A silent gap in the list would be worse than a visible one, so the
-/// count is handed back rather than swallowed.
+/// not yield a bill. A silent gap in the list would be worse than a visible one,
+/// so the count is handed back rather than swallowed.
 function parseBills(stdout) {
     const bills = [];
     let broken = 0;
@@ -45,7 +45,17 @@ function parseBills(stdout) {
         if (line.length === 0)
             continue;
         try {
-            bills.push(JSON.parse(line));
+            const parsed = JSON.parse(line);
+            // A line that parses into something other than an object is not a
+            // bill, and must not become a card with nothing in it. The widget runs
+            // more than one command through the same data source, so a reply of
+            // `0` from the store check would otherwise land in the list as a
+            // number, which every later read of a field turns into `undefined`.
+            if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+                broken += 1;
+                continue;
+            }
+            bills.push(parsed);
         } catch (error) {
             broken += 1;
         }
@@ -72,6 +82,35 @@ function takePath(command) {
     const path = _inFlight[command];
     delete _inFlight[command];
     return path === undefined ? "" : path;
+}
+
+/// The command that asks the CLI how many bills are stored.
+///
+/// `history --count` opens the database and prints the number alone: no model, no
+/// daemon, nothing to load. The widget cannot be told about a wipe directly, since
+/// the wipe happens in another process in another terminal, so it asks about the
+/// one thing both sides share.
+function storedCountCommand(cliPath) {
+    return quote(cliPath) + " history --count";
+}
+
+/// The stored bill count from that command's stdout.
+///
+/// Returns -1 when the answer is not a bare number, and that is deliberately not
+/// 0: a CLI that is missing, replaced or told to print a usage message must not
+/// look like an empty store, or a typo would empty the list on screen.
+function parseStoredCount(stdout) {
+    const text = String(stdout).trim();
+    return /^\d+$/.test(text) ? Number(text) : -1;
+}
+
+/// Whether a stored count means the cards on screen are gone.
+///
+/// Only a plain 0 with something on screen does. An empty store and an empty list
+/// have nothing to reconcile, and -1 is "the CLI did not answer with a number",
+/// which has to leave the list alone rather than clear it.
+function wiped(count, shown) {
+    return count === 0 && shown > 0;
 }
 
 /// `file.pdf` or `file.pdf, S. 2` when a file holds more than one bill.

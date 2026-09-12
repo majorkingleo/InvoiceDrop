@@ -277,7 +277,19 @@ int runDoctor(const Extract::ReadOptions &readOptions, OllamaClient &client, Sto
 }
 
 /// `invoicedrop history`. Lists what is stored, newest first.
-int runHistory(Store &store, int limit, bool asJson){
+///
+/// `asCount` answers with the number alone and nothing else, which is how the
+/// widget finds out that the store was emptied. It is a separate branch rather
+/// than a line the caller is expected to parse out of the listing, because the
+/// listing is prose and prose changes.
+int runHistory(Store &store, int limit, bool asJson, bool asCount)
+{
+    if (asCount) {
+        out() << store.billCount() << Qt::endl;
+        out().flush();
+        return kExitOk;
+    }
+
     const QVector<StoredBill> bills = store.recent(qMax(1, limit));
 
     if (asJson) {
@@ -567,6 +579,9 @@ int runCli(const QStringList &arguments)
         QStringLiteral("limit"),
         QStringLiteral("How many bills `history` lists."),
         QStringLiteral("count"), QStringLiteral("20"));
+    const QCommandLineOption count(
+        QStringLiteral("count"),
+        QStringLiteral("With `history`: print how many bills are stored, and nothing else."));
     const QCommandLineOption inbox(
         QStringLiteral("inbox"),
         QStringLiteral("Folder the daemon watches."),
@@ -623,6 +638,7 @@ int runCli(const QStringList &arguments)
     parser.addOption(noCache);
     parser.addOption(move);
     parser.addOption(limit);
+    parser.addOption(count);
     parser.addOption(inbox);
     parser.addOption(once);
     parser.addOption(noNotify);
@@ -740,7 +756,7 @@ int runCli(const QStringList &arguments)
         return runWipe(store);
 
     if (historyMode)
-        return runHistory(store, parser.value(limit).toInt(), asJson);
+        return runHistory(store, parser.value(limit).toInt(), asJson, parser.isSet(count));
 
     if (doctorMode) {
         OllamaOptions doctorOptions;

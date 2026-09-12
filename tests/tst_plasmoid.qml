@@ -84,6 +84,17 @@ Item {
 
         const mixed = Logic.parseBills('{"bill":1}\nnot json\n{"bill":2}\n');
         check("unparsable lines are counted, not dropped", mixed.broken, 1);
+
+        // A line that parses into something that is not an object is not a bill.
+        // The store check answers with a bare number through the same data source,
+        // and a number that reached the list would be a card with nothing in it.
+        check("a bare number is not a bill", Logic.parseBills("0\n7\n").bills.length, 0);
+        check("a bare number is counted as broken", Logic.parseBills("0\n").broken, 1);
+        check("a bare string is not a bill", Logic.parseBills('"hello"').broken, 1);
+        check("null is not a bill", Logic.parseBills("null").broken, 1);
+        check("an array is not a bill", Logic.parseBills("[1,2]").broken, 1);
+        check("the bills around it still arrive",
+              Logic.parseBills('{"bill":1}\n0\n{"bill":2}\n').bills.length, 2);
         check("the parsable ones survive", mixed.bills.length, 2);
 
         // ------------------------------------------------- recovering the file
@@ -331,6 +342,37 @@ Item {
         check("the markup escapes it instead of reading it",
               Logic.billHtml(sharp, german)
                    .indexOf("Aussteller: Müller &amp; Söhne &lt;GmbH&gt;") > 0, true);
+
+        // ------------------------------------------------------- the store check
+        // The list on screen is built from drops and lives in this shell only, so
+        // a `--wipe` in a terminal cannot reach it. The stored count is what tells
+        // the widget its cards are gone.
+        check("the count command",
+              Logic.storedCountCommand("invoicedrop"), "'invoicedrop' history --count");
+        check("a path with a space is quoted like everywhere else",
+              Logic.storedCountCommand("/opt/my tools/invoicedrop"),
+              "'/opt/my tools/invoicedrop' history --count");
+
+        check("nothing stored is zero", Logic.parseStoredCount("0\n"), 0);
+        check("the number with whitespace around it", Logic.parseStoredCount("  7  "), 7);
+
+        // Anything that is not a bare number is -1, and -1 never clears the list.
+        // A missing binary, a usage message and the human listing all have to look
+        // like "no answer" rather than like an empty store.
+        check("no answer is not a wipe", Logic.parseStoredCount(""), -1);
+        check("whitespace is not a wipe", Logic.parseStoredCount("   \n"), -1);
+        check("the human listing is not a count",
+              Logic.parseStoredCount("1 of 3 stored bill(s), database /tmp/x.db"), -1);
+        check("an empty store sentence is not a count",
+              Logic.parseStoredCount("nothing stored yet in /tmp/x.db"), -1);
+        check("a negative number is not a count", Logic.parseStoredCount("-1"), -1);
+        check("a count with a unit is not a count", Logic.parseStoredCount("3 bills"), -1);
+
+        // What the count means for the list on screen.
+        check("an empty store with cards up clears them", Logic.wiped(0, 3), true);
+        check("an empty store with nothing up changes nothing", Logic.wiped(0, 0), false);
+        check("bills still stored leave the list alone", Logic.wiped(7, 3), false);
+        check("and so does an answer that is not a number", Logic.wiped(-1, 3), false);
 
         console.log(harness.failures === 0 ? "ALL PASSED"
                                            : (harness.failures + " CHECK(S) FAILED"));

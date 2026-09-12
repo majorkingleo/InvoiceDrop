@@ -338,6 +338,7 @@ invoicedrop *.pdf; and echo "alle gelesen"
 | `--no-cache` | read the document again instead of using the store |
 | `--move` | move the original into the archive once every bill was read |
 | `--limit N` | how many bills `history` lists, default 20 |
+| `--count` | with `history`: print how many bills are stored, and nothing else |
 | `--local` | read here instead of asking a running daemon to do it |
 | `--wipe` | delete every stored bill, the archive and the inbox. Takes no files |
 
@@ -443,6 +444,20 @@ Settings are available in the widget's own configuration dialog: the binary path
 the model, how many bills to keep in the list, whether a document should be moved
 into the archive once it was read, and whether a finished document should raise a
 desktop notification.
+
+### When the store is emptied
+
+The list is built from drops and lives in the running shell, so `--wipe` in a
+terminal deletes the bills and cannot reach the cards on screen. The store is the
+one thing both sides share, so the widget asks about it: opening the popup runs
+`invoicedrop history --count`, and a plain `0` empties the list, closes the detail
+view and says so.
+
+Only a bare number clears anything. A missing binary, a usage message or the
+human listing comes back as `-1` in `invoicelogic.js` and leaves the list alone,
+so a typo in the configured command cannot look like a wipe. The check runs when
+the popup opens, which is the moment a stale card would be visible to anyone; it
+does not watch the database.
 
 ### The notification switch
 
@@ -551,6 +566,7 @@ invoicedrop rechnung.pdf      # 2 s, reads and stores
 invoicedrop rechnung.pdf      # instant, answered from the store
 invoicedrop history           # everything stored, newest first
 invoicedrop history --json    # one JSON object per line
+invoicedrop history --count   # just how many are stored, for scripts
 ```
 
 The cache is keyed on the hash of the file **and** on the settings that change

@@ -174,3 +174,54 @@ nothing there, and a command in `~/.local/bin` may not be on that PATH.
 **Fix:** resolve paths to absolute in the widget before handing them over, and
 configure the command's location explicitly instead of relying on PATH. Make it a
 setting (`cfg_command`) so a wrong guess is fixable without reinstalling.
+
+## 14. A signal handler that uses an injected parameter warns on every load
+
+**Symptom:** this line in the shell's journal, at every shell start, with no
+visible effect on the widget:
+
+```
+main.qml:44:5 Parameter "expanded" is not declared. Injection of parameters into
+signal handlers is deprecated. Use JavaScript functions with formal parameters instead.
+```
+
+**Cause:** the handler refers to the signal's parameter by its implicit name —
+`onExpandedChanged: { if (expanded) … }` — instead of declaring it. Qt 6 still
+injects it, and warns.
+
+**Fix:** declare the parameter:
+
+```qml
+onExpandedChanged: function (expanded) {
+    if (expanded)
+        refreshFromStore();
+}
+```
+
+Then read the log rather than assuming a clean load, and **filter on the current
+shell's PID**:
+
+```bash
+pid=$(pgrep -x plasmashell)
+journalctl --user -b _PID=$pid --no-pager | grep -i qml
+```
+
+Without the PID filter, a warning from a shell that was replaced an hour ago is
+still in the journal and looks like a current one — which is exactly how this was
+first misread as unfixed.
+
+## 15. A reply from one command is mistaken for another
+
+**Symptom:** an empty card appears in a list that should not have grown, or a
+value that is plainly a number is shown as a blank field.
+
+**Cause:** two commands run through the same `executable` data source, and the
+reply is parsed by the wrong branch. JSON is forgiving: `0` and `"hello"` parse
+successfully, so a strict "did it parse?" check accepts them and a
+`JSON.parse()` result that is not an object becomes a record with no fields.
+
+**Fix:** route replies on the exact command string that was connected (build both
+sides from one function so they cannot drift), and accept only objects as
+records — count anything else as a broken line rather than as data. Both are worth
+a test in the harness.
+

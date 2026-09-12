@@ -84,6 +84,24 @@ Two details that cost time:
 The engine hands over four keys: `stdout`, `stderr`, `exit code` and
 `exit status`.
 
+### The widget does not own the store, so it asks about it
+
+The list on screen is built from drops and lives in the shell, while `--wipe` runs
+in another process in another terminal. Nothing connects the two: deleting rows
+cannot reach a `property var bills` that a drop filled an hour ago.
+
+The store is the one thing both sides share, so opening the popup runs
+`invoicedrop history --count` — a database open and a `COUNT(*)`, with no model and
+no daemon behind it — and a `0` empties the list and closes the detail view. The
+answer is parsed by `parseStoredCount` in `invoicelogic.js`, which returns `-1` for
+anything that is not a bare number: a CLI that is missing or replaced must not look
+like an empty store, or a typo in `cliPath` would wipe the list on screen. Only
+the count that is exactly `0` clears, and only when there is something to clear.
+
+The check runs when the popup opens, because that is when a stale card becomes
+visible. It is not a watcher: a wipe while the popup is already open is seen the
+next time it is opened.
+
 ## Repository layout
 
 ```
@@ -217,6 +235,7 @@ scripting and for the plasmoid.
 | `--move` | move the original into the archive once every bill was read |
 | `--db PATH` | database file, defaults to `~/.local/share/invoicedrop/invoicedrop.db` |
 | `--limit N` | how many bills `history` lists |
+| `--count` | with `history`: the stored bill count alone, for a caller that needs a number and not prose |
 | `--local` | read here instead of asking a running daemon |
 | `--verbose` | extraction notes and timings on stderr |
 | `--wipe` | delete every bill, the archive and the inbox; takes no files |

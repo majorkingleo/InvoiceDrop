@@ -37,7 +37,42 @@ PlasmoidItem {
 
     preferredRepresentation: fullRepresentation
 
+    /// Opening the popup is the moment a stale list becomes visible, so it is the
+    /// moment to ask about the store. The cards on screen outlive nothing: they
+    /// are built from drops and live in this shell, while `--wipe` runs in a
+    /// terminal in another process and cannot reach them.
+    ///
+    /// The parameter is declared rather than left to the signal's implicit
+    /// injection: referencing `expanded` without declaring it is deprecated in Qt 6
+    /// and warns at load time, in the shell's log where nothing else does.
+    onExpandedChanged: function (expanded) {
+        if (expanded)
+            refreshFromStore();
+    }
+
     // --------------------------------------------------------------- pipeline
+
+    /// Asks the CLI how many bills are stored.
+    ///
+    /// One cheap call: `history --count` opens the database and answers, so there
+    /// is no model, no daemon and no wait behind it.
+    function refreshFromStore() {
+        executable.connectSource(Logic.storedCountCommand(cliPath));
+    }
+
+    /// Drops the list when the store has nothing left in it.
+    ///
+    /// The decision is in the logic module and the effects are here: only a plain
+    /// zero clears, and only when something is on screen. The detail view goes
+    /// with the list, because the bill it was showing is no longer stored either.
+    function applyStoredCount(count) {
+        if (!Logic.wiped(count, bills.length))
+            return;
+
+        bills = [];
+        openBill = null;
+        statusText = i18n("Keine Belege mehr gespeichert");
+    }
 
     /// Runs the CLI on one file. It answers in JSON, one object per bill, and
     /// hands the work to a running daemon on its own, so a warm daemon makes
@@ -61,6 +96,14 @@ PlasmoidItem {
     }
 
     function handleReply(source, stdout, stderr, exitCode) {
+        // The store check is not a drop: it has no path to look up, it must not
+        // count as work in progress, and its reply is a number rather than a list
+        // of bills.
+        if (source === Logic.storedCountCommand(cliPath)) {
+            applyStoredCount(Logic.parseStoredCount(stdout));
+            return;
+        }
+
         running = Math.max(0, running - 1);
 
         const path = Logic.takePath(source);
