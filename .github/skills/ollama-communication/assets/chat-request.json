@@ -1,0 +1,45 @@
+{
+    "model": "gemma4:latest",
+    "stream": false,
+    "think": false,
+    "keep_alive": "30m",
+    "format": {
+        "type": "object",
+        "properties": {
+            "vendor": {
+                "type": "string",
+                "description": "Name of the company that issued the document"
+            },
+            "date": {
+                "type": "string",
+                "description": "Issue date, ISO 8601, YYYY-MM-DD"
+            },
+            "currency": {
+                "type": "string",
+                "description": "ISO 4217 code such as EUR"
+            },
+            "gross_total": {
+                "type": "number",
+                "description": "Final amount payable including tax"
+            }
+        },
+        "required": ["vendor", "gross_total", "currency"]
+    },
+    "options": {
+        "temperature": 0
+    },
+    "messages": [
+        {
+            "role": "system",
+            "content": "You read business documents and return structured data.\nRules:\n- The images are the source of truth; extracted text is a hint and may be corrupted.\n- A photographed receipt is narrow and long. Read it line by line, do not stop early.\n- On a receipt, the total is the final amount actually paid, not a subtotal and not a running balance.\n- Use a dot as the decimal separator and no thousands separator.\n- If you cannot read a value, leave the field out. Never guess and never invent a number.\n- Output the JSON object only, with no surrounding text."
+        },
+        {
+            "role": "user",
+            "content": "Extract the fields. Write free text fields in \"de\".\n\n--- extracted text, may be corrupted ---\n<the text layer, if the document has one>",
+            "images": [
+                "<base64 jpeg page 1>",
+                "<base64 jpeg page 2>"
+            ]
+        }
+    ]
+}
