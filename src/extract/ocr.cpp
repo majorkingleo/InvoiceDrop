@@ -1,5 +1,7 @@
 #include "extract/ocr.h"
 
+#include "log.h"
+
 #include <QtGlobal>
 
 #include <tesseract/baseapi.h>
@@ -63,7 +65,16 @@ bool available(const OcrOptions &options)
 {
     if (!options.enabled)
         return false;
-    return engine().ensure(options);
+
+    // A language pack that will not load is the silent failure here: OCR simply
+    // does not happen, no note is written and the page is read from the image
+    // alone. Worth a line of its own for that reason.
+    if (!engine().ensure(options)) {
+        Log::warn("ocr", QStringLiteral("Tesseract cannot load '%1', reading without OCR")
+                             .arg(options.languages));
+        return false;
+    }
+    return true;
 }
 
 PIX *prepare(PIX *pix, const OcrOptions &options, QStringList *notes)
@@ -93,10 +104,10 @@ PIX *prepare(PIX *pix, const OcrOptions &options, QStringList *notes)
                 pixDestroy(&gray);
                 gray = magnified;
                 if (notes)
-                    notes->append(QStringLiteral("OCR: magnified %1x to %2x%3")
-                                      .arg(factor, 0, 'f', 1)
-                                      .arg(pixGetWidth(gray))
-                                      .arg(pixGetHeight(gray)));
+                    Log::note(notes, "ocr", QStringLiteral("OCR: magnified %1x to %2x%3")
+                                             .arg(factor, 0, 'f', 1)
+                                             .arg(pixGetWidth(gray))
+                                             .arg(pixGetHeight(gray)));
             }
         }
     }
@@ -109,7 +120,7 @@ PIX *prepare(PIX *pix, const OcrOptions &options, QStringList *notes)
             pixDestroy(&gray);
             gray = normalised;
             if (notes)
-                notes->append(QStringLiteral("OCR: contrast normalised"));
+                Log::note(notes, "ocr", QStringLiteral("OCR: contrast normalised"));
         }
     }
 
@@ -169,6 +180,16 @@ QString imageToText(PIX *pix, const OcrOptions &options, QStringList *notes, QSt
     }
 
     pixDestroy(&prepared);
+
+    // What the recogniser was given and what came back out of it. A page that
+    // yields 800 characters here is the case where OCR was worth its seconds;
+    // one that yields twelve is the case `--ocr` is off by default for.
+    Log::step("ocr", QStringLiteral("%1x%2, psm %3: %4 characters")
+                           .arg(width)
+                           .arg(height)
+                           .arg(options.pageSegMode)
+                           .arg(text.size()));
+
     return text;
 }
 

@@ -857,6 +857,83 @@ the order of the question are as designed, not as seen.
 
 ---
 
+## Watching a run
+
+The pipeline made a dozen decisions per page and said almost nothing about any of
+them. Which route a file took, the resolution its pages were rendered at, the size
+they were downscaled to, the text that was handed over: all of it was invisible
+until the result happened to look wrong, and then the only way to find out was to
+read the code. `--verbose` made that worse rather than better, because it printed
+an unordered list of notes after the fact and never said what had been sent.
+
+Delivered:
+
+- `src/log.{h,cpp}` with three levels (off, steps, detail) and four kinds of line
+  (step, model traffic, warning, dump), tags padded to a column and coloured by
+  kind. It lives in `invoicedrop-extract` because that is the one target both
+  libraries already link, and it uses Qt Core only, like the rest of that target.
+- `--verbose` for the steps, `--debug` for the prompts and the answers, and
+  `--no-color` for a terminal that should have neither.
+- `Log::note(notes, stage, text)`, which writes the note the store keeps and the
+  line the log shows out of one string, so the two cannot come to disagree.
+- Lines in the readers, the analysis pipeline, the HTTP client and the CLI, and a
+  new `tst_log` suite for the formatting and the colour decision. Nine offline
+  suites now, ten with `bills`.
+
+What this found:
+
+- **The first real run printed the text-layer decision twice**, because the reader
+  records it as a note and the new line said the same thing again. Only the
+  branches that end in rasterising speak up now; the one that uses the text layer
+  is the note one line further down.
+- **The model line was printed twice too**, once by the CLI from its options and
+  once by the client from the request. The client's version won, because it is
+  built out of the object that is actually sent.
+- **A note reports the requested dpi, not the rendered one.** `[render] page 1:
+  312 dpi, 1000x3645 px` sits two lines above `1 page(s) rasterised at 200 dpi,
+  long edge 1600`, and both describe the same page: 200 dpi is what was asked for,
+  312 is what a page 82 mm wide needs. The note is part of the JSON and was left
+  alone; the log now puts the true number next to it.
+- **`minShortEdge` is a floor, not a target.** A 487 px wide photo is not
+  magnified by the downscale (`487x999 -> 487x999`, measured), and a 1000x3645
+  render is not shrunk to a long edge of 1600, because that would take the short
+  edge to 440 px. One scanned page therefore leaves as a 509 KB JPEG inside a
+  680 KB request. That is the documented intent, and it is visible now.
+- **`--dump-images` reads the document twice**, once for the dump and once inside
+  `analyseFile`, so its log shows two whole pipelines for one file. That is
+  pre-existing; the log says which read is which instead of leaving it to be
+  guessed at.
+- **A watched run cannot be delegated.** The daemon writes to its own stderr, so
+  `--verbose` has to read here, says so in its first line, and pays the model load
+  a warm daemon would have saved. Sending a log level over D-Bus would have
+  changed the signature of `Analyze` for the sake of a debugging flag.
+- **The colours were checked through a pty, not assumed from a pipe.**
+  `script -qc "invoicedrop --verbose …" /dev/null | cat -v` shows `^[[36m[opts]^[[0m`
+  on a terminal, and nothing with `NO_COLOR=1` or `TERM=dumb`. A pipe gets no
+  escape codes at all, which is why `2> run.log` is plain text.
+- **OCR, measured on one photograph.** `--ocr` on `Rechnung 2.jpg` magnified 2.9x
+  to 1400x2872, normalised the contrast, recognised 717 characters and took
+  2152 ms for the extraction, against 5 ms for the same file without it. The log
+  makes that trade visible instead of it being a claim in a comment.
+- **`.clang-format` was invalid, so the format check never looked at a file.**
+  `Standard: c++20` appeared twice, clang-format answers `duplicated mapping key`
+  and refuses the file, and the task in `tasks.json` fails on that before it
+  reaches any source. Removing the duplicate makes the file readable, and the
+  check then reports almost the whole tree: the config describes a style the code
+  does not use. `BreakBeforeBraces: Attach` wants `void f() {` where every file
+  writes the brace on its own line, and `PointerAlignment: Left` wants
+  `Type* name` where the code is written `Type *name`, which is the LLVM default
+  the file is based on. Only the duplicate was removed; reformatting the tree to
+  match a style nobody chose was not a decision to make on the way past.
+
+Not verified, and worth saying so: the daemon. `invoicedrop daemon --verbose`
+takes the same flags through the same parser and writes to the journal, but no
+daemon run was watched, so what the lines look like there is untested. The tty
+path was checked with `script`, the formatting by `tst_log`, and the rest by the
+runs quoted above.
+
+---
+
 ## Build commands
 
 Packages:

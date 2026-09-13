@@ -119,6 +119,20 @@ else()
     message(STATUS "qmlscene6 not found, skipping the plasmoid logic checks")
 endif()
 
+# The log's own decisions: how much is on, whether a tag gets a colour, and how a
+# block is laid out. The formatting is a pure function, which is the only reason
+# any of it can be checked -- what the lines look like on a terminal is not
+# something a test can see, so it was looked at by hand.
+qt_add_executable(tst_log tst_log.cpp)
+
+target_link_libraries(tst_log
+    PRIVATE
+        invoicedrop-ai
+        Qt6::Test
+)
+
+add_test(NAME log COMMAND tst_log)
+
 # Run from the project root so tests/testdata is reachable by relative path as
 # well as through QFINDTESTDATA.
 set_tests_properties(documentreader PROPERTIES

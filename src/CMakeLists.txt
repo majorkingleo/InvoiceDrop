@@ -4,6 +4,10 @@
 # ---------------------------------------------------------------------------
 
 add_library(invoicedrop-extract STATIC
+    # The logger lives here rather than with the network layer because the readers
+    # are the ones with something to say, and this is the one target both libraries
+    # already share. Qt Core only, like everything else in this target.
+    log.cpp
     extract/documentreader.cpp
     extract/imagereader.cpp
     extract/imageops.cpp

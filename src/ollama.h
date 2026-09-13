@@ -3,6 +3,7 @@
 #include "invoice.h"
 
 #include <QByteArray>
+#include <QJsonObject>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -63,9 +64,12 @@ public:
     qint64 lastInferenceMs() const { return m_lastInferenceMs; }
 
 private:
-    QByteArray buildRequestBody(const QString &text,
-                                const QList<QByteArray> &jpegPages,
-                                const QString &complaint) const;
+    /// The request body as an object, so the same value can be serialised for the
+    /// wire and read back for `--debug`. A second builder for the log would have
+    /// drifted from this one within a phase.
+    QJsonObject buildRequest(const QString &text,
+                             const QList<QByteArray> &jpegPages,
+                             const QString &complaint) const;
 
     QString request(const QByteArray &method,
                     const QString &path,

@@ -1,6 +1,7 @@
 #include "ollama.h"
 
 #include "invoice-schema.h"
+#include "log.h"
 
 #include <QElapsedTimer>
 #include <QEventLoop>
@@ -42,6 +43,62 @@ QString userPrompt(const QString &language)
 QString seconds(qint64 milliseconds)
 {
     return QString::number(milliseconds / 1000.0, 'f', 1) + QStringLiteral(" s");
+}
+
+/// Writes what is about to be sent, read out of the request object itself rather
+/// than out of the arguments. A change to the builder then turns up in the log
+/// without a second place having to be remembered.
+void logRequest(const OllamaOptions &options,
+                const QJsonObject &request,
+                const QByteArray &payload,
+                const QList<QByteArray> &jpegPages,
+                int attempt)
+{
+    QString system;
+    QString user;
+    const QJsonArray messages = request.value(QStringLiteral("messages")).toArray();
+    for (const QJsonValue &entry : messages) {
+        const QJsonObject message = entry.toObject();
+        const QString role = message.value(QStringLiteral("role")).toString();
+        const QString content = message.value(QStringLiteral("content")).toString();
+        if (role == QLatin1String("system"))
+            system = content;
+        else if (role == QLatin1String("user"))
+            user = content;
+    }
+
+    qsizetype imageBytes = 0;
+    for (const QByteArray &page : jpegPages)
+        imageBytes += page.size();
+
+    const int schemaFields =
+        request.value(QStringLiteral("format")).toObject().value(QStringLiteral("properties"))
+            .toObject()
+            .size();
+
+    Log::step("ai", QStringLiteral("model %1, language %2, think %3, stream off, temperature 0, "
+                                    "keep_alive %4, format: schema with %5 properties")
+                           .arg(options.model)
+                           .arg(options.language)
+                           .arg(options.think ? QStringLiteral("on") : QStringLiteral("off"))
+                           .arg(options.keepAlive)
+                           .arg(schemaFields));
+    Log::step("ai", QStringLiteral("payload: %1 characters of prompt, %2 image(s), %3 KB of "
+                                    "jpeg before base64")
+                           .arg(user.size())
+                           .arg(jpegPages.size())
+                           .arg(imageBytes / 1024));
+    Log::model("ai", QStringLiteral("attempt %1: %2 KB to POST %3/api/chat, timeout %4 s")
+                          .arg(attempt + 1)
+                          .arg(payload.size() / 1024)
+                          .arg(options.url)
+                          .arg(options.timeoutMs / 1000));
+
+    // The two halves of the prompt, in full. This is the answer to "what did the
+    // model actually get", and there is no shorter one: the text layer goes in
+    // verbatim, and so does the complaint on a second attempt.
+    Log::block("ai", QStringLiteral("system prompt, %1 characters").arg(system.size()), system);
+    Log::block("ai", QStringLiteral("user prompt, %1 characters").arg(user.size()), user);
 }
 
 } // namespace
@@ -93,6 +150,8 @@ QString OllamaClient::request(const QByteArray &method,
     if (timedOut) {
         reply->abort();
         reply->deleteLater();
+        Log::warn("ai", QStringLiteral("no answer from %1 after %2, giving up")
+                             .arg(m_options.url, seconds(timeoutMs)));
         if (error) {
             *error = QStringLiteral("no answer from %1 after %2 - the model may still be loading")
                          .arg(m_options.url, seconds(timeoutMs));
@@ -168,9 +227,9 @@ QStringList OllamaClient::installedModels(QString *error) const
     return names;
 }
 
-QByteArray OllamaClient::buildRequestBody(const QString &text,
-                                          const QList<QByteArray> &jpegPages,
-                                          const QString &complaint) const
+QJsonObject OllamaClient::buildRequest(const QString &text,
+                                      const QList<QByteArray> &jpegPages,
+                                      const QString &complaint) const
 {
     QJsonArray messages;
 
@@ -217,7 +276,7 @@ QByteArray OllamaClient::buildRequestBody(const QString &text,
     body.insert(QStringLiteral("format"), invoiceSchema());
     body.insert(QStringLiteral("options"), options);
 
-    return QJsonDocument(body).toJson(QJsonDocument::Compact);
+    return body;
 }
 
 bool OllamaClient::analyse(const QString &text,
@@ -237,7 +296,10 @@ bool OllamaClient::analyse(const QString &text,
     QString complaint;
 
     for (int attempt = 0; attempt < 2; ++attempt) {
-        const QByteArray payload = buildRequestBody(text, jpegPages, complaint);
+        const QJsonObject requestObject = buildRequest(text, jpegPages, complaint);
+        const QByteArray payload = QJsonDocument(requestObject).toJson(QJsonDocument::Compact);
+
+        logRequest(m_options, requestObject, payload, jpegPages, attempt);
 
         QString transportError;
         QElapsedTimer timer;
@@ -248,6 +310,9 @@ bool OllamaClient::analyse(const QString &text,
         m_lastInferenceMs = timer.elapsed();
 
         if (body.isEmpty()) {
+            Log::warn("ai", QStringLiteral("nothing came back after %1 ms: %2")
+                                 .arg(m_lastInferenceMs)
+                                 .arg(transportError));
             if (error)
                 *error = transportError;
             return false;
@@ -257,6 +322,15 @@ bool OllamaClient::analyse(const QString &text,
         const QJsonObject message = object.value(QStringLiteral("message")).toObject();
         const QString content = message.value(QStringLiteral("content")).toString();
 
+        Log::model("ai", QStringLiteral("answer %1 in %2 ms: %3 bytes of JSON, %4 characters "
+                                         "of content")
+                              .arg(attempt + 1)
+                              .arg(m_lastInferenceMs)
+                              .arg(body.size())
+                              .arg(content.size()));
+        Log::block("ai", QStringLiteral("answer %1, %2 characters").arg(attempt + 1).arg(
+                              content.size()), content);
+
         QString parseError;
         Invoice parsed = Invoice::fromModelReply(content, &parseError);
 
@@ -265,8 +339,11 @@ bool OllamaClient::analyse(const QString &text,
             // read off the text, and it does drop the date on some runs.
             if (parsed.date.isEmpty()) {
                 const QString fallback = findLabelledDate(text);
-                if (!fallback.isEmpty())
+                if (!fallback.isEmpty()) {
                     parsed.date = fallback;
+                    Log::step("ai", QStringLiteral("no date in the answer, took %1 off the text")
+                                           .arg(fallback));
+                }
             }
             *invoice = parsed;
             return true;
@@ -276,6 +353,12 @@ bool OllamaClient::analyse(const QString &text,
             complaint = !parseError.isEmpty()
                 ? parseError
                 : QStringLiteral("the vendor name and the gross total are both required");
+            // The one retry there is, and the reason for it: the reply parsed, so
+            // the model understood the format, but the fields phase 2 needs are
+            // missing. Asking again with the complaint attached is worth a second
+            // request; a third would not be.
+            Log::warn("ai", QStringLiteral("answer rejected (%1), asking once more")
+                                 .arg(complaint));
             continue;
         }
 
@@ -288,6 +371,10 @@ bool OllamaClient::analyse(const QString &text,
             else
                 *error = QStringLiteral("the model did not return a vendor and a total");
         }
+        Log::warn("ai", QStringLiteral("second answer rejected as well: %1")
+                             .arg(parseError.isEmpty()
+                                      ? QStringLiteral("no vendor and no total")
+                                      : parseError));
         return false;
     }
 

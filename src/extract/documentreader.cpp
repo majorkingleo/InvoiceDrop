@@ -4,6 +4,7 @@
 #include "extract/imageops.h"
 #include "extract/ocr.h"
 #include "extract/pdfreader.h"
+#include "log.h"
 
 #include <QElapsedTimer>
 #include <QFileInfo>
@@ -43,6 +44,14 @@ void readImage(const QString &path, const ReadOptions &options, Document *docume
             page.jpeg = jpeg;
             page.width = pixGetWidth(pix);
             page.height = pixGetHeight(pix);
+            // What leaves the reader for the model, at the last point where its
+            // size is knowable: the request itself carries base64, which is a
+            // third larger again and says nothing about the picture.
+            Log::step("image", QStringLiteral("page image %1x%2, jpeg %3 KB at quality %4")
+                                   .arg(page.width)
+                                   .arg(page.height)
+                                   .arg(jpeg.size() / 1024)
+                                   .arg(options.jpegQuality));
         }
     }
 
@@ -103,6 +112,18 @@ Document readDocument(const QString &path, const ReadOptions &options)
     }
 
     document.elapsedMs = timer.elapsed();
+
+    // One line per file, whichever route it took, so a long run can be read back
+    // without counting the lines in between.
+    if (document.ok()) {
+        Log::step("read", QStringLiteral("%1: %2 page(s) read in %3 ms")
+                               .arg(kindName(document.kind))
+                               .arg(document.pages.size())
+                               .arg(document.elapsedMs));
+    } else {
+        Log::warn("read", document.error);
+    }
+
     return document;
 }
 

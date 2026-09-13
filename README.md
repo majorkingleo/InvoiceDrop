@@ -41,6 +41,7 @@ invoicedrop rechnung.pdf ~/scans/*.jpg   # one line per bill
 invoicedrop --json rechnung.pdf | jq .gross_total
 invoicedrop history                      # what is stored, newest first
 invoicedrop daemon                       # watch the inbox, announce arrivals
+invoicedrop --verbose rechnung.pdf       # step by step; --debug adds the prompts
 ```
 
 A bill is a page, not a file: a two page scan prints two lines, labelled
@@ -76,7 +77,7 @@ is evidence of. Three rules were followed while writing:
 
 What it does not mean is that any of this is right because it compiles. Nobody has
 read the code line by line, and an assistant is very good at producing something
-that merely looks considered. The tests are the guard: eight suites, seven of which
+that merely looks considered. The tests are the guard: ten suites, nine of which
 need neither a model nor a network and finish in about five seconds
 (`ctest --test-dir build -E bills`). Where the reasoning is checkable it is
 written down in `docs/architecture.md`, so it can be argued with.

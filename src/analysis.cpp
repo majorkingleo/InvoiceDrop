@@ -1,6 +1,7 @@
 #include "analysis.h"
 
 #include "hash.h"
+#include "log.h"
 #include "paths.h"
 #include "store.h"
 
@@ -80,18 +81,36 @@ QVector<BillResult> analyseFile(const QString &path,
         sha256 = fileSha256(target);
         const QString fingerprint = Store::fingerprint(readOptions, client.options().model);
 
+        // The two keys a cached answer stands on. A run that returns the wrong
+        // bill is nearly always a run whose fingerprint matched when it should
+        // not have, so both are worth seeing.
+        if (!sha256.isEmpty())
+            Log::step("cache", QStringLiteral("sha256 %1..., fingerprint %2...")
+                                   .arg(sha256.left(12), fingerprint.left(12)));
+
         if (!sha256.isEmpty()) {
             const std::optional<CachedDocument> cached = cache->find(sha256, fingerprint);
             if (cached.has_value()) {
                 for (const StoredBill &stored : cache->bills(sha256))
                     bills.append(fromStored(target, stored, cached->pageCount));
-                if (!bills.isEmpty())
+                if (!bills.isEmpty()) {
+                    Log::step("cache", QStringLiteral("hit, stored %1: %2 bill(s), no model call")
+                                           .arg(cached->createdAt)
+                                           .arg(bills.size()));
                     return bills;
+                }
                 // A document row without bills is a half written record. Fall
                 // through and read the file again rather than report nothing.
+                Log::warn("cache",
+                          QStringLiteral("the stored document holds no bill, reading again"));
             }
         }
+    } else {
+        Log::step("cache", QStringLiteral("not consulted for this run"));
     }
+
+    if (cache)
+        Log::step("cache", QStringLiteral("miss, reading the document"));
 
     const Extract::Document document = Extract::readDocument(target, readOptions);
 
@@ -135,6 +154,8 @@ QVector<BillResult> analyseFile(const QString &path,
             bill.fromTextLayer = page.fromTextLayer;
             bill.rasterShortEdge = page.jpeg.isEmpty() ? 0 : qMin(page.width, page.height);
             bill.qualityWarning = warningFor(page);
+            if (!bill.qualityWarning.isEmpty())
+                Log::warn("quality", bill.qualityWarning);
             if (!page.jpeg.isEmpty())
                 images.append(page.jpeg);
         } else {
@@ -143,18 +164,45 @@ QVector<BillResult> analyseFile(const QString &path,
             text = document.text;
         }
 
+        // What is about to be handed over, which is the question `--verbose`
+        // exists to answer. The route decides it, and the route was a decision.
+        const QString carried = text.trimmed().isEmpty()
+            ? QStringLiteral("no text")
+            : QStringLiteral("%1 characters from the %2")
+                  .arg(text.size())
+                  .arg(bill.fromTextLayer ? QStringLiteral("text layer")
+                                          : QStringLiteral("raster or OCR"));
+        Log::step("ai", QStringLiteral("page %1 of %2: sending %3")
+                            .arg(bill.page)
+                            .arg(bill.pageCount)
+                            .arg(carried));
+
         bill.ok = client.analyse(text, images, &bill.invoice, &bill.error);
         bill.inferMs = client.lastInferenceMs();
 
         if (!bill.ok && bill.error.isEmpty())
             bill.error = QStringLiteral("the model returned no usable fields");
 
+        Log::step("bill", QStringLiteral("page %1: %2 in %3 ms")
+                              .arg(bill.page)
+                              .arg(bill.ok ? bill.invoice.summary() : bill.error)
+                              .arg(bill.inferMs));
+
         bills.append(bill);
     }
 
-    if (cache && !sha256.isEmpty())
-        cache->save(sha256, Store::fingerprint(readOptions, client.options().model), document,
-                    bills, client.options().model);
+    if (cache && !sha256.isEmpty()) {
+        const bool saved =
+            cache->save(sha256, Store::fingerprint(readOptions, client.options().model), document,
+                        bills, client.options().model);
+        if (saved) {
+            Log::step("store", QStringLiteral("stored %1 bill(s) under %2...")
+                                   .arg(bills.size())
+                                   .arg(sha256.left(12)));
+        } else {
+            Log::warn("store", QStringLiteral("not stored: %1").arg(cache->error()));
+        }
+    }
 
     return bills;
 }

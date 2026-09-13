@@ -1,6 +1,7 @@
 #include "extract/imagereader.h"
 
 #include "extract/imageops.h"
+#include "log.h"
 
 #include <cstring>
 
@@ -158,10 +159,10 @@ PIX *load(const QString &path, const ReadOptions &options, QStringList *notes, Q
         return nullptr;
     }
 
-    notes->append(QStringLiteral("decoded %1x%2, depth %3")
-                      .arg(pixGetWidth(pix))
-                      .arg(pixGetHeight(pix))
-                      .arg(pixGetDepth(pix)));
+    Log::note(notes, "image", QStringLiteral("decoded %1x%2, depth %3")
+                                 .arg(pixGetWidth(pix))
+                                 .arg(pixGetHeight(pix))
+                                 .arg(pixGetDepth(pix)));
 
     // EXIF lives in the JPEG header, so only read it when it can matter.
     if (QFileInfo(path).suffix().compare(QStringLiteral("jpg"), Qt::CaseInsensitive) == 0
@@ -175,10 +176,12 @@ PIX *load(const QString &path, const ReadOptions &options, QStringList *notes, Q
                 if (rotated) {
                     pixDestroy(&pix);
                     pix = rotated;
-                    notes->append(QStringLiteral("EXIF orientation %1 applied").arg(orientation));
+                    Log::note(notes, "image",
+                              QStringLiteral("EXIF orientation %1 applied").arg(orientation));
                 } else {
-                    notes->append(
-                        QStringLiteral("EXIF orientation %1 could not be applied").arg(orientation));
+                    Log::note(notes, "image",
+                              QStringLiteral("EXIF orientation %1 could not be applied")
+                                  .arg(orientation));
                 }
             }
         }
@@ -191,6 +194,12 @@ PIX *load(const QString &path, const ReadOptions &options, QStringList *notes, Q
         return nullptr;
     }
 
+    // Both sizes, because the interesting one when a photo reads badly is what it
+    // was before the downscale: a 4000 px photo that arrives as 1600 px is fine,
+    // a 600 px one has already lost the text by the time the model sees it.
+    const int decodedWidth = pixGetWidth(rgb);
+    const int decodedHeight = pixGetHeight(rgb);
+
     PIX *scaled = ImageOps::downscale(rgb, options.longEdge, options.minShortEdge);
     pixDestroy(&rgb);
     if (!scaled) {
@@ -198,9 +207,17 @@ PIX *load(const QString &path, const ReadOptions &options, QStringList *notes, Q
         return nullptr;
     }
 
-    notes->append(QStringLiteral("prepared %1x%2 for the model")
-                      .arg(pixGetWidth(scaled))
-                      .arg(pixGetHeight(scaled)));
+    Log::note(notes, "image", QStringLiteral("prepared %1x%2 for the model")
+                                 .arg(pixGetWidth(scaled))
+                                 .arg(pixGetHeight(scaled)));
+    Log::step("image", QStringLiteral("%1x%2 -> %3x%4 (long edge at most %5, short edge never "
+                                      "below %6)")
+                           .arg(decodedWidth)
+                           .arg(decodedHeight)
+                           .arg(pixGetWidth(scaled))
+                           .arg(pixGetHeight(scaled))
+                           .arg(options.longEdge)
+                           .arg(options.minShortEdge));
 
     return scaled;
 }

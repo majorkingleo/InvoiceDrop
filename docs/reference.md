@@ -287,7 +287,9 @@ invoicedrop *.pdf; and echo "alle gelesen"
 | Option | Effect |
 |--------|--------|
 | `--json` | machine readable output |
-| `--verbose` | extraction notes and timings on stderr |
+| `--verbose` | show what the run does on stderr, step by step |
+| `--debug` | everything `--verbose` shows, plus the prompts and the answers, in full. Implies `--verbose` |
+| `--no-color` | plain text on stderr, even on a terminal |
 | `--extract-only`, `-e` | print what the extractor found, skip the model |
 | `--dump-images DIR` | write the rasterised pages as JPEG, for inspection |
 | `--db PATH` | database file, defaults to `~/.local/share/invoicedrop/invoicedrop.db` |
@@ -319,6 +321,77 @@ Off by default. These only matter with `--ocr`.
 | `--no-normalise` | skip adaptive contrast normalisation |
 
 `-v` is not available for `--verbose`; Qt reserves it for `--version`.
+
+## Watching a run
+
+A read that goes wrong is hard to reason about from its result. The file's route
+through the extractor, the resolution it was rendered at, the size it was
+downscaled to and the text that was handed over are all invisible in the output,
+and every one of them is a decision that can be the reason.
+
+```fish
+invoicedrop --verbose rechnung.pdf        # what the run does, step by step
+invoicedrop --debug rechnung.pdf          # the same, plus the prompts and answers
+invoicedrop --debug rechnung.pdf 2> run.log   # colours off, because 2> is not a tty
+```
+
+`--verbose` writes one line per step to stderr, tagged with what produced it:
+
+```
+[opts]    dpi 200, pages 1, long edge 1600, short edge at least 1000, route text layer when there is one
+[ocr]     off (--ocr turns it on), languages deu+eng, short edge 1400 px, psm 6, normalise on
+[cache]   on, database /home/u/.local/share/invoicedrop/invoicedrop.db
+[file]    /home/u/Rechnungen/Material.pdf
+[cache]   sha256 14d6bab8eb17..., fingerprint 48cafe67af78...
+[pdf]     MuPDF: 1 page(s), reading 1
+[pdf]     text layer: about 0 characters per page
+[pdf]     no usable text layer (0 characters per page, threshold 120), rasterising
+[render]  resolution raised to 312 dpi for a 82 mm narrow page
+[render]  page 1: 312 dpi, 1000x3645 px
+[render]  page 1: 1000x3645 downscaled to 1000x3645, jpeg 509 KB at quality 85
+[read]    pdf: 1 page(s) read in 49 ms
+[ai]      page 1 of 1: sending no text
+[ai]      payload: 128 characters of prompt, 1 image(s), 509 KB of jpeg before base64
+[ai]      attempt 1: 680 KB to POST http://127.0.0.1:11434/api/chat, timeout 300 s
+[ai]      answer 1 in 2365 ms: 548 bytes of JSON, 221 characters of content
+[bill]    page 1: Unser Lagerhaus Warenhandels ges.m.b.H., 2025-07-17, 18,48 EUR in 2365 ms
+[store]   stored 1 bill(s) under 14d6bab8eb17...
+Material.pdf  Unser Lagerhaus Warenhandels ges.m.b.H.  2025-07-17  18,48 EUR
+```
+
+That run took a scanned page, rendered it at 312 dpi because the paper is only
+82 mm wide, sent it as a 509 KB JPEG, and got the shop, the date and the sum back
+in 2.4 s. All of it used to be invisible; the numbers are the same ones
+`--json` reports, in the order they were produced.
+
+`--debug` adds the two things that are not metadata:
+
+* the **prompt**, system and user, in full, each line prefixed with `[ai]      |`
+  so that blocking the prefix out leaves exactly what was sent -- extracted text
+  included, which is the half that is worth reading when the answer is wrong;
+* the **raw answer**, as the model wrote it, before parsing.
+
+The images travel as base64 in the request and are *not* printed: they would be
+hundreds of kilobytes of opaque text. `--verbose` says how many there are and how
+big, and `--dump-images DIR` writes them out to be looked at.
+
+Colours are used when stderr is a terminal, one per kind of line: cyan for the
+steps, magenta for what goes to the model and comes back, yellow for something
+skipped, capped or asked again, dim for a dump. `NO_COLOR` and `TERM=dumb` turn
+them off by themselves, and `--no-color` does it explicitly.
+
+Two things worth knowing about what a watched run does not do:
+
+* **It does not hand the read to the daemon.** The log is written by the process
+  that does the work, so a run that is being watched reads here and pays the model
+  load a warm daemon would have avoided. The first line of the log says so.
+* **It does not change what is stored.** The notes that go into the database and
+  into `history` are written by the same call as the log lines, so the two cannot
+  drift, and a run without `--verbose` stores exactly the same thing.
+
+The daemon takes the same flags: `invoicedrop daemon --verbose` logs to the
+journal, where `journalctl --user -u invoicedrop -f` shows it. A daemon started
+by the session bus or by systemd has no flags, and so writes nothing.
 
 ## Examples
 
@@ -686,6 +759,16 @@ invoicedrop --verbose --dump-images /tmp/pages receipt.jpg
 If `/tmp/pages` shows a legible image, try another model. If it shows a narrow
 strip, the source itself is clipped and no model can fix that.
 
+Then at what the model was asked and what it answered:
+
+```fish
+invoicedrop --debug receipt.jpg 2> run.log
+```
+
+The log names the resolution the page was rendered at, the size it was downscaled
+to, and the JPEG that came out of it — the image the model actually received,
+which is not always the one on disk. See [Watching a run](#watching-a-run).
+
 **`quality_warning: the source is only 174 px across`**
 The scan is too small to read. Rescan at 300 dpi. This is the one case where the
 model produces plausible-looking numbers that are simply wrong.
@@ -744,7 +827,7 @@ src/                    the binary
   ollama.{h,cpp}        the HTTP client
   store.{h,cpp}         SQLite: documents, bills, the settings fingerprint
   extract/              document reading: MuPDF, Leptonica, Tesseract
-tests/                  eight suites, run with ctest
+tests/                  ten suites, run with ctest
   testdata/             real invoices plus their expected results
 docs/reference.md       this document: options, formats, daemon, widget
 docs/architecture.md    how it works and why

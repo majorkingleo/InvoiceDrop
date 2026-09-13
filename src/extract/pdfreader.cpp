@@ -3,6 +3,7 @@
 #include "extract/imageops.h"
 #include "extract/ocr.h"
 #include "extract/threadctx.h"
+#include "log.h"
 
 #include <algorithm>
 #include <cmath>
@@ -229,7 +230,7 @@ float chooseZoom(const fz_rect &bounds, const ReadOptions &options, QStringList 
                                      .arg(zoom * 72.0, 0, 'f', 0)
                                      .arg(shortEdgePoints * 25.4 / 72.0, 0, 'f', 0);
             if (notes && !notes->contains(note))
-                notes->append(note);
+                Log::note(notes, "render", note);
         }
     }
 
@@ -242,7 +243,7 @@ float chooseZoom(const fz_rect &bounds, const ReadOptions &options, QStringList 
                 QStringLiteral("resolution limited to %1 dpi by the pixel budget")
                     .arg(zoom * 72.0, 0, 'f', 0);
             if (notes && !notes->contains(note))
-                notes->append(note);
+                Log::note(notes, "render", note);
         }
     }
 
@@ -269,6 +270,12 @@ PIX *renderPage(fz_context *ctx,
     const float zoom = chooseZoom(bounds, options, notes);
     const fz_matrix transform = fz_scale(zoom, zoom);
     const fz_irect bbox = fz_round_rect(fz_transform_rect(bounds, transform));
+
+    Log::step("render", QStringLiteral("page %1: %2 dpi, %3x%4 px")
+                            .arg(index + 1)
+                            .arg(zoom * 72.0, 0, 'f', 0)
+                            .arg(bbox.x1 - bbox.x0)
+                            .arg(bbox.y1 - bbox.y0));
 
     PixmapGuard pixmap(ctx);
     pixmap.handle = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), bbox, nullptr, 0);
@@ -308,14 +315,20 @@ bool finishPage(PIX *pagePix, int index, const ReadOptions &options, DocumentPag
 {
     PIX *rgb = ImageOps::toRgb32(pagePix);
     if (!rgb) {
-        notes->append(QStringLiteral("page %1: conversion to RGB failed").arg(index + 1));
+        Log::note(notes, "render",
+                  QStringLiteral("page %1: conversion to RGB failed").arg(index + 1));
         return false;
     }
+
+    // Captured before the downscale, because afterwards the original size is gone
+    // and it is the pair that says whether the page was ever going to be legible.
+    const int renderedWidth = pixGetWidth(rgb);
+    const int renderedHeight = pixGetHeight(rgb);
 
     PIX *scaled = ImageOps::downscale(rgb, options.longEdge, options.minShortEdge);
     pixDestroy(&rgb);
     if (!scaled) {
-        notes->append(QStringLiteral("page %1: downscale failed").arg(index + 1));
+        Log::note(notes, "render", QStringLiteral("page %1: downscale failed").arg(index + 1));
         return false;
     }
 
@@ -331,6 +344,15 @@ bool finishPage(PIX *pagePix, int index, const ReadOptions &options, DocumentPag
             page->width = pixGetWidth(scaled);
             page->height = pixGetHeight(scaled);
             usable = true;
+            Log::step("render", QStringLiteral("page %1: %2x%3 downscaled to %4x%5, jpeg %6 KB "
+                                               "at quality %7")
+                                    .arg(index + 1)
+                                    .arg(renderedWidth)
+                                    .arg(renderedHeight)
+                                    .arg(page->width)
+                                    .arg(page->height)
+                                    .arg(jpeg.size() / 1024)
+                                    .arg(options.jpegQuality));
         }
     }
 
@@ -341,7 +363,8 @@ bool finishPage(PIX *pagePix, int index, const ReadOptions &options, DocumentPag
             *ocrText = recognized;
             usable = true;
         } else if (!ocrError.isEmpty()) {
-            notes->append(QStringLiteral("page %1 OCR: %2").arg(index + 1).arg(ocrError));
+            Log::note(notes, "ocr",
+                      QStringLiteral("page %1 OCR: %2").arg(index + 1).arg(ocrError));
         }
     }
 
@@ -378,11 +401,12 @@ bool read(const QString &path, const ReadOptions &options, Document *document)
 
         const int limit = options.maxPages > 0 ? options.maxPages : pageCount;
         const int pagesToRead = std::clamp(limit, 1, pageCount);
-        document->notes.append(
-            QStringLiteral("MuPDF: %1 page(s), reading %2").arg(pageCount).arg(pagesToRead));
+        Log::note(&document->notes, "pdf",
+                  QStringLiteral("MuPDF: %1 page(s), reading %2").arg(pageCount).arg(pagesToRead));
         if (pagesToRead < pageCount)
-            document->notes.append(QStringLiteral("%1 page(s) skipped by the page limit")
-                                       .arg(pageCount - pagesToRead));
+            Log::note(&document->notes, "pdf",
+                      QStringLiteral("%1 page(s) skipped by the page limit")
+                          .arg(pageCount - pagesToRead));
 
         QVector<QString> pageTexts(pagesToRead);
 
@@ -394,8 +418,22 @@ bool read(const QString &path, const ReadOptions &options, Document *document)
             }
             const double average = static_cast<double>(total) / pagesToRead;
             document->hasTextLayer = average >= options.textLayerThreshold;
-            document->notes.append(QStringLiteral("text layer: about %1 characters per page")
-                                       .arg(average, 0, 'f', 0));
+            Log::note(&document->notes, "pdf",
+                      QStringLiteral("text layer: about %1 characters per page")
+                          .arg(average, 0, 'f', 0));
+
+            // Only the branches that end in rasterising say anything here. The
+            // one that uses the text layer is already the next line down, in the
+            // note the store keeps, and printing it twice was the first thing the
+            // log did wrong.
+            if (options.want != Want::Images && !document->hasTextLayer) {
+                Log::step("pdf", options.want == Want::Text
+                        ? QStringLiteral("no text layer, and --text-only forbids rasterising")
+                        : QStringLiteral("no usable text layer (%1 characters per page, "
+                                         "threshold %2), rasterising")
+                              .arg(average, 0, 'f', 0)
+                              .arg(options.textLayerThreshold));
+            }
         }
 
         if (document->hasTextLayer && options.want != Want::Images) {
@@ -407,7 +445,8 @@ bool read(const QString &path, const ReadOptions &options, Document *document)
                 document->pages.append(page);
             }
             document->text = pageTexts.join(QStringLiteral("\n\n")).trimmed();
-            document->notes.append(QStringLiteral("text layer used, nothing rasterised"));
+            Log::note(&document->notes, "pdf",
+                      QStringLiteral("text layer used, nothing rasterised"));
             return true;
         }
 
@@ -432,7 +471,7 @@ bool read(const QString &path, const ReadOptions &options, Document *document)
             QString renderError;
             PIX *pagePix = renderPage(ctx, doc.handle, i, options, &document->notes, &renderError);
             if (!pagePix) {
-                document->notes.append(renderError);
+                Log::note(&document->notes, "render", renderError);
                 // Keep the page in the list even when it failed, so the bill
                 // numbers the user wrote down still line up with the output.
                 page.text = pageTexts.at(i);
@@ -470,13 +509,14 @@ bool read(const QString &path, const ReadOptions &options, Document *document)
         }
         document->text = collected.join(QStringLiteral("\n\n"));
         if (!document->text.isEmpty())
-            document->notes.append(
-                QStringLiteral("text recovered by OCR (%1)").arg(options.ocr.languages));
+            Log::note(&document->notes, "ocr",
+                      QStringLiteral("text recovered by OCR (%1)").arg(options.ocr.languages));
         if (!document->pages.isEmpty())
-            document->notes.append(QStringLiteral("%1 page(s) rasterised at %2 dpi, long edge %3")
-                                       .arg(document->pages.size())
-                                       .arg(options.dpi)
-                                       .arg(options.longEdge));
+            Log::note(&document->notes, "render",
+                      QStringLiteral("%1 page(s) rasterised at %2 dpi, long edge %3")
+                          .arg(document->pages.size())
+                          .arg(options.dpi)
+                          .arg(options.longEdge));
 
         return true;
     } catch (const std::exception &exception) {
