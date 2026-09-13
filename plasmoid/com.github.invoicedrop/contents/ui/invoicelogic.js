@@ -9,6 +9,21 @@ function quote(value) {
     return "'" + String(value).replace(/'/g, "'\\''") + "'";
 }
 
+/// The first line of a message, which is the one worth showing.
+///
+/// A command that failed explains itself on its first line and fills the rest with
+/// whatever it was doing, and the widget's status row has room for one line.
+function firstLine(text) {
+    if (text === undefined || text === null)
+        return "";
+
+    const trimmed = String(text).trim();
+    if (trimmed.length === 0)
+        return "";
+
+    return trimmed.split("\n")[0].trim();
+}
+
 /// Builds the command line the widget runs.
 ///
 /// The CLI answers in JSON, one object per bill per line, and hands the work to
@@ -24,6 +39,27 @@ function buildCommand(cliPath, model, archiveAfterReading, notify, path) {
         parts.push("--model", quote(model));
     if (archiveAfterReading)
         parts.push("--move");
+    if (!notify)
+        parts.push("--no-notify");
+    parts.push(quote(path));
+    return parts.join(" ");
+}
+
+/// The command that reads one document again, ignoring the store.
+///
+/// `--no-cache` is the whole point: a retry is asked for because the answer on
+/// screen is wrong, and the stored answer that produced it would only be handed
+/// back a second time. It also settles where the work happens — the CLI reads a
+/// `--no-cache` request itself rather than handing it to a running daemon — which
+/// is what makes this slower than a drop and worth a second thought before use.
+///
+/// `--move` is left out, unlike in `buildCommand`. After a first read the
+/// original may already be in the archive, and a retry that asked for it again
+/// would fail on a document that is not there any more.
+function retryCommand(cliPath, model, notify, path) {
+    const parts = [quote(cliPath), "--json", "--no-cache"];
+    if (model)
+        parts.push("--model", quote(model));
     if (!notify)
         parts.push("--no-notify");
     parts.push(quote(path));
@@ -111,6 +147,77 @@ function parseStoredCount(stdout) {
 /// which has to leave the list alone rather than clear it.
 function wiped(count, shown) {
     return count === 0 && shown > 0;
+}
+
+/// The command that empties the store, the archive and the inbox.
+///
+/// The same three places the CLI's `--wipe` takes, asked for from the widget
+/// instead of from a terminal. It names no files and it is not delegated to a
+/// running daemon, so the reply is the three lines the CLI prints rather than any
+/// JSON, and the list on screen is reconciled afterwards by asking how many bills
+/// are stored.
+function wipeCommand(cliPath) {
+    return quote(cliPath) + " --wipe";
+}
+
+// ------------------------------------------------------------ reading again
+
+/// Whether a bill can be read again: only when the CLI sent its document's path.
+///
+/// The file name alone is not a path. The process that would do the reading runs
+/// in `$HOME`, so a bare name resolves to nothing there, and a bill the CLI
+/// reported always carries an absolute path; one without it did not come through
+/// this pipeline, and a button that asks for it would fail every time.
+function retryable(bill) {
+    if (bill === null || bill === undefined)
+        return false;
+    if (bill.path === undefined || bill.path === null)
+        return false;
+    return String(bill.path).length > 0;
+}
+
+/// Puts a reply into the list, replacing a document that was read before rather
+/// than adding a second copy of it.
+///
+/// A retry is not an append. The cards of the file were the wrong ones, and
+/// leaving them next to the new ones would show the same invoice twice, one of
+/// them holding the answer the retry was asked to replace. The fresh bills go to
+/// the top, which is where a read belongs, and the file's older cards are dropped
+/// — all of them, because a file is read as a whole and only one of its pages may
+/// have been the bad one.
+function mergeBills(bills, fresh, limit) {
+    if (!fresh || fresh.length === 0)
+        return bills;
+
+    const key = fileKey(fresh[0]);
+    const kept = [];
+    for (let i = 0; i < bills.length; ++i) {
+        if (key.length > 0 && fileKey(bills[i]) === key)
+            continue;
+        kept.push(bills[i]);
+    }
+
+    const merged = fresh.concat(kept);
+    return limit > 0 ? merged.slice(0, limit) : merged;
+}
+
+/// The bill a detail view should show after its document was read again.
+///
+/// The reply carries new objects, so the bill on screen would otherwise be a copy
+/// that is no longer in the list: it would keep showing the answer that was just
+/// replaced, and no later read could reach it. The same page of the same file is
+/// the same bill. When that page is not in the answer any more, `null` closes the
+/// view instead of leaving a stale one up.
+function reopenedBill(open, bills) {
+    if (open === null || open === undefined || !bills)
+        return null;
+
+    const key = fileKey(open);
+    for (let i = 0; i < bills.length; ++i) {
+        if (fileKey(bills[i]) === key && bills[i].bill === open.bill)
+            return bills[i];
+    }
+    return null;
 }
 
 /// `file.pdf` or `file.pdf, S. 2` when a file holds more than one bill.

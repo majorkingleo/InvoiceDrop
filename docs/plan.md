@@ -779,6 +779,84 @@ the shell restarted.
 
 ---
 
+## Clearing the store, and reading one again
+
+Two things were missing from the widget, and both are about a list that is wrong.
+`--wipe` existed from phase 3 and could only be reached from a terminal, which is
+the wrong place for it: the reason to wipe is a card on screen that should not be
+there. And a card that read wrong — an amount off, a vendor invented, a page that
+came back as an error — had no way of being read a second time, so the only repair
+was to drop the file again from a terminal, where the store answers with the very
+answer that was wrong.
+
+Delivered:
+
+- A clear button in the popup footer, beside the status line, visible while there
+  is something in the list and disabled while a document is being read: a wipe in
+  the middle of a read would delete the bills that read is about to store.
+- `contents/ui/WipePrompt.qml` — the question between the button and the store,
+  naming the stored count, with Escape answering the same as *Abbrechen*.
+- `Logic.wipeCommand`, and a reply branch for it in `main.qml`. `--wipe` is not
+  delegated to a daemon and prints text rather than JSON, so it is routed on the
+  exact command string, the way the store check already was.
+- A refresh button in the detail view's header, and `Logic.retryCommand`, which
+  adds `--no-cache` and leaves `--move` out.
+- `Logic.retryable`, `Logic.mergeBills` and `Logic.reopenedBill`, with 21 new
+  cases in `tst_plasmoid.qml` (118 in the harness now).
+
+What this found:
+
+- **The button does not clear the list, and that is the design.** The list goes
+  when the store answers that it is empty, which is the road the popup already
+  travels for a wipe in a terminal. A wipe that failed therefore leaves the cards
+  on screen, where they are still true, instead of emptying the widget over a
+  database that is still full.
+- **A retry is not an append.** Reading a file again replaces its cards, all of
+  them, because a document is read as a whole and only one of its pages may have
+  been the bad one. That also changes a second drop of a file that is already in
+  the list: it replaces the cards rather than showing the same invoice twice, one
+  copy holding the answer that was just replaced. Nothing depended on the old
+  behaviour, and the history limit still applies to the merged list.
+- **The reply carries new objects, so an open detail view would have gone stale.**
+  It would have kept showing the bill that was just replaced, and no later read
+  could have reached it. `reopenedBill` points the view at the same page of the
+  same file, and closes it when that page is not in the answer.
+- **`--move` had to leave the retry.** After a first read with archiving on, the
+  original is in the archive, and a retry that asked for it again would fail on a
+  document that is not there. The bill's own path is what is read, and the archive
+  is where it still is.
+- **A retry pays for a model load, and that is the CLI's decision rather than the
+  widget's.** `--no-cache` is one of the flags the CLI reads itself instead of
+  handing the work to a running daemon, so a retry is the slow path by
+  construction. It is the reason the button sits in the detail view, as a second
+  opinion one has to ask for, instead of something the widget does when it
+  dislikes an answer.
+- **The question is an item in the popup, not a `Dialog`.** The reason is the
+  popup's grab: a dialog opened from inside a popup window competes for it, and
+  the usual end of that is the popup closing and taking the question with it. That
+  reasoning was not measured — no `Dialog` was tried — so it is written down as
+  the reason the item was chosen and not as a result, and it is the first thing to
+  test if this is ever turned back into a dialog. What was measured is that the
+  two components load outside Plasma: `WipePrompt.qml` and `BillDetails.qml`
+  instantiate under `qmlscene6 -platform offscreen`, both signals fire, and the
+  bill travels with `retried(bill)`.
+- **The third command through one data source needed routing, not cleverness.**
+  `parseBills` already refuses anything that is not an object, so the wipe's text
+  could not have become a card — but the reply would have decremented the busy
+  counter and been looked up as a file that does not exist. It is branched on the
+  exact string, built by the same function on both sides.
+
+Not verified, and worth saying so: the click. The package was installed and the
+shell replaced — the running `plasmashell` was seconds old afterwards and the user
+unit active, checked rather than assumed — the two components were loaded
+offscreen, and the logic has its 21 new checks. But no button in the panel was
+pressed by hand and no wipe was run from the widget. Nothing in this repository
+can press it: the popup, the cards and the question are QML in a running shell,
+and the harness runs a `.js` module with no window. So the wording, the layout and
+the order of the question are as designed, not as seen.
+
+---
+
 ## Build commands
 
 Packages:

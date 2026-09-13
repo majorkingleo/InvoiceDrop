@@ -401,6 +401,30 @@ the model, how many bills to keep in the list, whether a document should be move
 into the archive once it was read, and whether a finished document should raise a
 desktop notification.
 
+### The clear button
+
+The whole list can be emptied from the widget: a button in the footer, beside the
+status line, visible while there is something to empty and disabled while a
+read is running. A wipe in the middle of a read would delete the bills that read
+is about to store, which is the one way to lose a document twice.
+
+It asks first. `--wipe` deletes the database, the archive and the inbox, none of
+the three comes back, and a widget in a panel is a place where a click lands by
+accident. The CLI cannot do the asking, because it has no interactive mode, so the
+question is drawn into the popup by `WipePrompt.qml` rather than opened as a
+`Dialog`: the popup is the window that already has the focus, and a dialog opened
+from inside it competes for the grab, which usually ends with the popup closing
+and the question with it. Escape answers the same as *Abbrechen*; the answer that
+needs an aim is the one that deletes.
+
+The question names the stored count, which the popup's own check has already
+fetched. The list is not cleared by the button, though: it goes when the store
+answers that it is empty, the same road a wipe in a terminal travels, so a wipe
+that failed leaves the cards on screen where they are still true, with the CLI's
+first line of stderr in the status row. While the wipe runs, the question stays up
+and goes quiet, so the answer and its consequence are one gesture instead of a
+question that vanishes and a list that empties later for no visible reason.
+
 ### When the store is emptied
 
 The list is built from drops and lives in the running shell, so `--wipe` in a
@@ -414,6 +438,34 @@ human listing comes back as `-1` in `invoicelogic.js` and leaves the list alone,
 so a typo in the configured command cannot look like a wipe. The check runs when
 the popup opens, which is the moment a stale card would be visible to anyone; it
 does not watch the database.
+
+### Reading a document again
+
+A card is what the model read. When it read it wrong -- an amount off, a vendor
+invented, a page that came back as an error -- the detail view holds the second
+opinion: a refresh button in its header, beside the vendor, which reads that
+document again.
+
+It is the one action in the widget that deliberately does not ask the store,
+because the stored answer is the answer being replaced: the command carries
+`--no-cache`. It leaves `--move` out, unlike a drop, because after a first read
+with archiving on the original is already in the archive and a retry that asked
+for it again would fail on a document that is not there.
+
+Two consequences follow from the CLI rather than from the widget. `--no-cache` is
+read by the CLI itself instead of being handed to a running daemon, so a retry
+pays the model load a drop avoids -- which is also why it is a button in the
+detail view and not something the widget does on its own. And a document is read
+as a whole, so all of its cards are replaced rather than the page that was
+clicked: the file goes back to the top of the list, where a read belongs, and its
+old cards are dropped, because two copies of one invoice on screen would be that
+invoice twice -- one of them holding the answer the retry was asked to replace.
+The detail view stays on the same page of the same file and closes when that page
+is not in the new answer, so the two readings can be compared without leaving it.
+
+While the read runs, a spinner takes the button's place. The popup covers the
+status row, and a retry pays a model load more often than not, so a button that
+merely went grey would read as broken for as long as a document takes.
 
 ### The notification switch
 
