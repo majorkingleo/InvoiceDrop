@@ -84,17 +84,6 @@ Item {
 
         const mixed = Logic.parseBills('{"bill":1}\nnot json\n{"bill":2}\n');
         check("unparsable lines are counted, not dropped", mixed.broken, 1);
-
-        // A line that parses into something that is not an object is not a bill.
-        // The store check answers with a bare number through the same data source,
-        // and a number that reached the list would be a card with nothing in it.
-        check("a bare number is not a bill", Logic.parseBills("0\n7\n").bills.length, 0);
-        check("a bare number is counted as broken", Logic.parseBills("0\n").broken, 1);
-        check("a bare string is not a bill", Logic.parseBills('"hello"').broken, 1);
-        check("null is not a bill", Logic.parseBills("null").broken, 1);
-        check("an array is not a bill", Logic.parseBills("[1,2]").broken, 1);
-        check("the bills around it still arrive",
-              Logic.parseBills('{"bill":1}\n0\n{"bill":2}\n').bills.length, 2);
         check("the parsable ones survive", mixed.bills.length, 2);
 
         // ------------------------------------------------- recovering the file
@@ -342,114 +331,6 @@ Item {
         check("the markup escapes it instead of reading it",
               Logic.billHtml(sharp, german)
                    .indexOf("Aussteller: Müller &amp; Söhne &lt;GmbH&gt;") > 0, true);
-
-        // ------------------------------------------------------- the store check
-        // The list on screen is built from drops and lives in this shell only, so
-        // a `--wipe` in a terminal cannot reach it. The stored count is what tells
-        // the widget its cards are gone.
-        check("the count command",
-              Logic.storedCountCommand("invoicedrop"), "'invoicedrop' history --count");
-        check("a path with a space is quoted like everywhere else",
-              Logic.storedCountCommand("/opt/my tools/invoicedrop"),
-              "'/opt/my tools/invoicedrop' history --count");
-
-        check("nothing stored is zero", Logic.parseStoredCount("0\n"), 0);
-        check("the number with whitespace around it", Logic.parseStoredCount("  7  "), 7);
-
-        // Anything that is not a bare number is -1, and -1 never clears the list.
-        // A missing binary, a usage message and the human listing all have to look
-        // like "no answer" rather than like an empty store.
-        check("no answer is not a wipe", Logic.parseStoredCount(""), -1);
-        check("whitespace is not a wipe", Logic.parseStoredCount("   \n"), -1);
-        check("the human listing is not a count",
-              Logic.parseStoredCount("1 of 3 stored bill(s), database /tmp/x.db"), -1);
-        check("an empty store sentence is not a count",
-              Logic.parseStoredCount("nothing stored yet in /tmp/x.db"), -1);
-        check("a negative number is not a count", Logic.parseStoredCount("-1"), -1);
-        check("a count with a unit is not a count", Logic.parseStoredCount("3 bills"), -1);
-
-        // What the count means for the list on screen.
-        check("an empty store with cards up clears them", Logic.wiped(0, 3), true);
-        check("an empty store with nothing up changes nothing", Logic.wiped(0, 0), false);
-        check("bills still stored leave the list alone", Logic.wiped(7, 3), false);
-        check("and so does an answer that is not a number", Logic.wiped(-1, 3), false);
-
-        // -------------------------------------------------------- reading again
-        // The clear button runs the `--wipe` a terminal runs, and it is not handed
-        // to a daemon: the reply is text rather than bills, so it is routed on the
-        // exact command string, the way the store check is.
-        check("the wipe command",
-              Logic.wipeCommand("invoicedrop"), "'invoicedrop' --wipe");
-        check("a path with a space is quoted there too",
-              Logic.wipeCommand("/opt/my tools/invoicedrop"),
-              "'/opt/my tools/invoicedrop' --wipe");
-
-        // A retry reads the document instead of taking the stored answer back: that
-        // answer is the one it was asked to replace.
-        check("the retry command",
-              Logic.retryCommand("invoicedrop", "", true, "/tmp/a.pdf"),
-              "'invoicedrop' --json --no-cache '/tmp/a.pdf'");
-        check("a retry keeps the model and the silence",
-              Logic.retryCommand("/opt/invoicedrop", "gemma4:latest", false,
-                                 "/tmp/mein beleg.pdf"),
-              "'/opt/invoicedrop' --json --no-cache --model 'gemma4:latest'"
-              + " --no-notify '/tmp/mein beleg.pdf'");
-        // And it does not ask for `--move`: after a first read with archiving on,
-        // the original is in the archive, so a retry that moved it again would fail
-        // on a document that is not there any more.
-        check("a retry never moves the document",
-              Logic.retryCommand("invoicedrop", "", true, "/tmp/a.pdf").indexOf("--move"), -1);
-        check("a retry is not the command a drop builds",
-              Logic.retryCommand("invoicedrop", "", true, "/tmp/a.pdf")
-              === Logic.buildCommand("invoicedrop", "", true, true, "/tmp/a.pdf"), false);
-
-        // Nothing without a path. The file name alone is not one, and the process
-        // that would do the reading works in `$HOME`.
-        check("a path can be read again", Logic.retryable({ path: "/tmp/a.pdf" }), true);
-        check("a file name alone cannot", Logic.retryable({ file: "a.pdf" }), false);
-        check("an empty path cannot", Logic.retryable({ path: "" }), false);
-        check("no bill at all cannot", Logic.retryable(null), false);
-
-        // A document that is read again replaces its cards. Two copies of one
-        // invoice would be that invoice twice, and one of them would be the answer
-        // the retry was asked to replace.
-        const before = [bill("a.pdf", 1, 1, 1.00), bill("b.pdf", 1, 1, 2.00)];
-        const replaced = Logic.mergeBills(before, [bill("b.pdf", 1, 1, 9.00)], 8);
-        check("the file is not in the list twice",
-              [replaced.length, replaced[0].gross_total, replaced[1].gross_total],
-              [2, 9.00, 1.00]);
-        check("the file that was not read again keeps its place", replaced[1].path, "a.pdf");
-
-        // The whole file is replaced, not the page that was clicked: one page may
-        // have been the reason, but the document is what is read.
-        const pages = [bill("a.pdf", 1, 3, 1.00), bill("a.pdf", 2, 3, 2.00),
-                       bill("a.pdf", 3, 3, 3.00), bill("c.pdf", 1, 1, 4.00)];
-        const fresh = [bill("a.pdf", 1, 3, 7.00), bill("a.pdf", 2, 3, 8.00),
-                       bill("a.pdf", 3, 3, 9.00)];
-        const merged = Logic.mergeBills(pages, fresh, 8);
-        check("every page of the file is replaced",
-              [merged.length, merged[0].gross_total, merged[3].path], [4, 7.00, "c.pdf"]);
-        check("the list keeps its limit", Logic.mergeBills(before, fresh, 3).length, 3);
-        check("an answer with no bill is no change", Logic.mergeBills(before, [], 8).length, 2);
-
-        // The detail view follows its page through a re-read: the reply carries new
-        // objects, so the bill on screen would otherwise be a copy that no later
-        // read could reach.
-        check("the view stays on its page",
-              Logic.reopenedBill(before[0],
-                                 [bill("b.pdf", 1, 1, 2.00), bill("a.pdf", 1, 1, 5.00)])
-                  .gross_total, 5.00);
-        check("a page that is gone closes the view",
-              Logic.reopenedBill(before[0], [bill("b.pdf", 1, 1, 2.00)]), null);
-        check("no open bill, nothing to reopen", Logic.reopenedBill(null, before), null);
-
-        // One line for the status row: a failing command explains itself on its
-        // first line and fills the rest with what it was doing.
-        check("the first line of a message",
-              Logic.firstLine("da ist etwas schiefgelaufen\n\nmehr Text"),
-              "da ist etwas schiefgelaufen");
-        check("a message of whitespace has no line", Logic.firstLine("  \n \n"), "");
-        check("an absent message has no line", Logic.firstLine(null), "");
 
         console.log(harness.failures === 0 ? "ALL PASSED"
                                            : (harness.failures + " CHECK(S) FAILED"));

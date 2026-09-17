@@ -31,21 +31,10 @@ Item {
     property bool withoutCurrency: false
     property bool showCopyNotice: true
 
-    /// True while the widget is reading a document, so the retry button cannot be
-    /// pressed while its own answer, or another document, is still on the way.
-    /// The popup covers the status row, so without this the button would look
-    /// available for the whole of a read.
-    property bool busy: false
-
     readonly property bool hasAmount: bill !== null
                                       && Logic.billAmount(bill) !== null
 
     signal closed()
-
-    /// Asked for by the button that reads the document again, and carries the bill
-    /// it was asked about: the button knows which page is on screen and the widget
-    /// does not have to guess whether the detail view moved in between.
-    signal retried(var bill)
 
     /// Both copy buttons go through here, so what they put on the clipboard is the
     /// value and nothing else.
@@ -122,31 +111,6 @@ Item {
                       && details.bill.vendor !== ""
                     ? details.bill.vendor
                     : i18n("Unbekannter Aussteller")
-            }
-
-            /// The bill on screen is the one that can be wrong, so this is where a
-            /// second opinion belongs. It is the only action in the widget that
-            /// deliberately does not ask the store first: `--no-cache` is the whole
-            /// of what a retry is, and the stored answer would be the one it is
-            /// meant to replace.
-            PlasmaComponents.ToolButton {
-                icon.name: "view-refresh"
-                text: i18n("Erneut lesen")
-                display: PlasmaComponents.AbstractButton.IconOnly
-                visible: !details.busy
-                enabled: Logic.retryable(details.bill)
-                onClicked: details.retried(details.bill)
-            }
-
-            /// In the button's place while the read is running. The popup covers
-            /// the status row, and a retry pays for a model load more often than not,
-            /// so a button that went grey and nothing else would read as broken.
-            PlasmaComponents.BusyIndicator {
-                Layout.alignment: Qt.AlignVCenter
-                implicitWidth: Kirigami.Units.iconSizes.smallMedium
-                implicitHeight: implicitWidth
-                visible: details.busy
-                running: details.busy
             }
         }
 

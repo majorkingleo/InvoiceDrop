@@ -7,7 +7,6 @@
 #include "extract/threadctx.h"
 #include "invoice.h"
 #include "json.h"
-#include "log.h"
 #include "ollama.h"
 #include "paths.h"
 #include "store.h"
@@ -564,17 +563,7 @@ int runCli(const QStringList &arguments)
                        "accurate on invoices: measured 10.2 s against 1.0 s."));
     const QCommandLineOption verboseOption(
         QStringLiteral("verbose"),
-        QStringLiteral("Show what the run does on stderr: the route through the extractor, "
-                       "what was rasterised and downscaled, what was handed to the model "
-                       "and how long each step took."));
-    const QCommandLineOption debugOption(
-        QStringLiteral("debug"),
-        QStringLiteral("Everything --verbose shows, plus the prompts sent to the model and "
-                       "the answers that came back, in full. Implies --verbose."));
-    const QCommandLineOption noColour(
-        QStringLiteral("no-color"),
-        QStringLiteral("Plain text on stderr. Colours appear only when stderr is a "
-                       "terminal; NO_COLOR and TERM=dumb already turn them off."));
+        QStringLiteral("Print extraction notes and timings on stderr."));
     const QCommandLineOption database(
         QStringLiteral("db"),
         QStringLiteral("Database file. Defaults to invoicedrop.db in the application data "
@@ -645,8 +634,6 @@ int runCli(const QStringList &arguments)
     parser.addOption(timeout);
     parser.addOption(think);
     parser.addOption(verboseOption);
-    parser.addOption(debugOption);
-    parser.addOption(noColour);
     parser.addOption(database);
     parser.addOption(noCache);
     parser.addOption(move);
@@ -674,16 +661,6 @@ int runCli(const QStringList &arguments)
     fullArguments.append(QCoreApplication::applicationFilePath());
     fullArguments.append(arguments);
     parser.process(fullArguments);
-
-    // The level and its colours are settled before anything else can be said. The
-    // daemon and the tests take the same parser, so `invoicedrop daemon --verbose`
-    // turns the same lines on in the journal, and a run with neither flag writes
-    // nothing at all.
-    const bool debugMode = parser.isSet(debugOption);
-    const bool verbose = parser.isSet(verboseOption) || debugMode;
-    Log::setLevel(debugMode ? Log::Level::Detail
-                            : (verbose ? Log::Level::Steps : Log::Level::Off));
-    Log::setColour(parser.isSet(noColour) ? Log::Colour::Never : Log::Colour::Auto);
 
     // Absolute before anything else looks at them. A relative path is only
     // meaningful next to the shell it was typed in, and the daemon that may end
@@ -762,30 +739,8 @@ int runCli(const QStringList &arguments)
 
     const bool withText = parser.isSet(extractOnly);
     const bool asJson = parser.isSet(json);
+    const bool verbose = parser.isSet(verboseOption);
     const bool extractOnlyMode = parser.isSet(extractOnly);
-
-    // What this run was asked for, before any file is opened. A log whose first
-    // lines do not say which switches were in play has to be read together with
-    // the command that produced it.
-    Log::step("opts", QStringLiteral("dpi %1, pages %2, long edge %3, short edge at least %4, "
-                                     "route %5")
-                          .arg(options.dpi)
-                          .arg(options.maxPages)
-                          .arg(options.longEdge)
-                          .arg(options.minShortEdge)
-                          .arg(options.want == Extract::Want::Text
-                                   ? QStringLiteral("text layer only")
-                                   : (options.want == Extract::Want::Images
-                                          ? QStringLiteral("rasterise always")
-                                          : QStringLiteral("text layer when there is one"))));
-    Log::step("ocr", QStringLiteral("%1, languages %2, short edge %3 px, psm %4, normalise %5")
-                          .arg(options.ocr.enabled ? QStringLiteral("on")
-                                                   : QStringLiteral("off (--ocr turns it on)"))
-                          .arg(options.ocr.languages)
-                          .arg(options.ocr.targetShortEdge)
-                          .arg(options.ocr.pageSegMode)
-                          .arg(options.ocr.normalise ? QStringLiteral("on")
-                                                     : QStringLiteral("off")));
 
     Store store(parser.isSet(database) ? parser.value(database) : Store::defaultPath());
     if (!store.isOpen()) {
@@ -793,11 +748,6 @@ int runCli(const QStringList &arguments)
         err().flush();
         return kExitFailure;
     }
-
-    Log::step("cache", QStringLiteral("%1, database %2")
-                           .arg(parser.isSet(noCache) ? QStringLiteral("off (--no-cache)")
-                                                      : QStringLiteral("on"))
-                           .arg(store.databasePath()));
 
     // Before the subcommands, because a wipe is not something they do: the store
     // is emptied once and the run ends, whether the reader also typed `history`
@@ -823,18 +773,8 @@ int runCli(const QStringList &arguments)
     // a cold start into a queue entry, and the reply is the same JSON the local
     // path would have produced. --no-cache and --dump-images stay local, because
     // the daemon cannot honour them.
-    //
-    // A watched run stays local as well. The log is written by the process that
-    // does the work, so a read the daemon performed would show nothing here, and
-    // the whole point of --verbose would be gone.
-    const bool handOver = !extractOnlyMode && !parser.isSet(local) && !parser.isSet(noCache)
-        && !parser.isSet(dumpImages) && !daemonMode && !doctorMode;
-    const bool delegatable = handOver && !verbose;
-
-    if (handOver && !delegatable) {
-        Log::step("cli", QStringLiteral("reading here instead of asking the daemon, so the log "
-                                        "comes from the process doing the work"));
-    }
+    const bool delegatable = !extractOnlyMode && !parser.isSet(local)
+        && !parser.isSet(noCache) && !parser.isSet(dumpImages) && !daemonMode && !doctorMode;
 
     if (delegatable) {
         const QDBusConnection bus = QDBusConnection::sessionBus();
@@ -892,7 +832,6 @@ int runCli(const QStringList &arguments)
     ollamaOptions.timeoutMs = qMax(1, parser.value(timeout).toInt()) * 1000;
 
     OllamaClient client(ollamaOptions);
-
 
     // One check up front beats the same failure repeated per file, and it lets
     // the message name the exact command that fixes it.
@@ -954,16 +893,10 @@ int runCli(const QStringList &arguments)
     bool allOk = true;
 
     for (const QString &file : files) {
-        Log::step("file", file);
-
         // --dump-images works off the raw extraction, so it needs the document
         // rather than the analysed bills. Only the debug flag pays for the
         // second read.
         if (parser.isSet(dumpImages)) {
-            // Said out loud: this is the one place the pipeline runs twice for the
-            // same file, and two reads in a log with no explanation between them
-            // read as a bug.
-            Log::step("dump", QStringLiteral("reading the document once more for --dump-images"));
             const Extract::Document document = Extract::readDocument(file, options);
             if (document.ok()) {
                 QStringList problems;

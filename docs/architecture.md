@@ -437,6 +437,41 @@ drops it in others; a date is a regular expression, not a judgement call. The
 fallback only accepts a date on a line that carries a date label, because the
 earliest date on a document is often a service period.
 
+That fallback needs text, and a photographed receipt has none: the text layer is
+0 characters, and OCR of a narrow thermal receipt came back as fragments
+(`v.—f"'i M`). So when the date is still missing and there are page images, it is
+asked for on its own, in a second request that carries **no** `format`. The schema
+is what loses this field — measured on the pharmacy receipt in `tests/testdata`:
+the extraction reply omits the date, the same image answers `21.07.2025` to a
+question about it, and a schema narrowed to the date alone answered `21`.
+
+Two cheaper ways to force it were tried and rejected by measurement, because both
+cost more than they gave. Adding `date` to the schema's `required` list, and
+wording the system prompt to insist on a date, each made the *second* bill of that
+same document come back with a wrong date (April for July) and a wrong total
+(21.82 for 10.90). The extraction request is therefore left exactly as it was, and
+the extra question fires only when the answer had no date — the only case that
+pays for it. `BillResult.notes` carries a line saying it happened, so a run that
+took two answers is not mistaken for one that took one.
+
+The answer to that question is a date or `NONE`, and it goes through
+`normaliseDate` like any other text, so a bare `21` cannot become a date.
+
+**What this question is not good at, measured:** a slip that prints a validity
+period — the Hofer receipt in `tests/testdata` says "Vom 01.05.2025 - 07.09.2025
+haben wir jeden Sonn- und Feiertag geöffnet" above a transaction line of
+`16.07.25 16:10` — gets the period's start back (`01.05.2025`) instead of the date
+of the purchase. Naming that trap in the prompt did not change the answer, so the
+prompt was left as it was rather than accumulating wording that does not earn its
+place. That document is not made worse by this: its extraction already answers
+with a date of its own (`2025-07-01`, also wrong), so the question is never asked
+for it.
+
+What is *not* covered by measurement: no document in `tests/testdata` lacks a date
+altogether, so "the second question invents one when the document has none" rests
+on the prompt and the normaliser, not on a test. A date that came from the question
+is recorded in `notes`, which is what makes a wrong one traceable after the fact.
+
 When the raster is too coarse to carry the text the model claims to have read —
 below 400 px on the short edge, with no text layer — the result is marked with
 `quality_warning`. Measured: at 174 px every model invents a vendor, a date and a

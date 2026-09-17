@@ -135,14 +135,24 @@ details:
    it in others. Read the labelled date out of the text yourself and use it when
    the model stays silent. Only accept a date on a line that carries a date
    label — the earliest date on a document is often a service period.
-2. **Below a certain raster resolution every model invents.** Measured: a scan
+2. **A JSON schema can cost you a field.** The same image that answers
+   `21.07.2025` to "what is the issue date?" left the date out of the
+   11-property `format` reply — and a schema narrowed to the date alone answered
+   `21`. So when a field matters and keeps coming back missing, ask for it in a
+   separate request **without** `format`, and normalise the prose answer, rather
+   than widening or tightening the schema. Do not force it with `required`
+   either: adding the date to the required list changed the same document's
+   second bill to a wrong date *and* a wrong total. Keep the extra question for
+   the case that needs it, and say in your own logs that it was asked, so a run
+   that took two answers is not mistaken for one that took one.
+3. **Below a certain raster resolution every model invents.** Measured: a scan
    174 px wide (~3.6 px per character) produced a confident vendor, a date and a
    total from two different models, and both were wrong; one invented a currency
    that is not on the paper. Below 400 px on the short edge with no text layer,
    mark the result as untrustworthy instead of presenting it as fact.
-3. **Do not ask for line items you do not display.** They multiply output tokens
+4. **Do not ask for line items you do not display.** They multiply output tokens
    and latency, and nothing reads them.
-4. **Do not ask a model to count, add up, or format money.** Do that in code.
+5. **Do not ask a model to count, add up, or format money.** Do that in code.
 
 ## Failure handling that stays actionable
 

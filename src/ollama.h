@@ -60,8 +60,13 @@ public:
                  Invoice *invoice,
                  QString *error = nullptr);
 
-    /// Milliseconds spent in the last successful `analyse`.
+    /// Milliseconds spent in the last successful `analyse`, including the extra
+    /// question when the issue date had to be asked for on its own.
     qint64 lastInferenceMs() const { return m_lastInferenceMs; }
+
+    /// True when the last `analyse` found no date and asked about it separately.
+    /// Reported as a note: it is the trace of a run that took two answers.
+    bool dateWasAskedAgain() const { return m_dateAsked; }
 
 private:
     /// The request body as an object, so the same value can be serialised for the
@@ -71,6 +76,10 @@ private:
                              const QList<QByteArray> &jpegPages,
                              const QString &complaint) const;
 
+    /// Asks for the issue date on its own, without a JSON schema, and returns it
+    /// normalised. Empty when the answer held no complete date.
+    QString askDate(const QList<QByteArray> &jpegPages) const;
+
     QString request(const QByteArray &method,
                     const QString &path,
                     const QByteArray &payload,
@@ -79,6 +88,7 @@ private:
 
     OllamaOptions m_options;
     qint64 m_lastInferenceMs = 0;
+    bool m_dateAsked = false;
 };
 
 } // namespace InvoiceDrop
