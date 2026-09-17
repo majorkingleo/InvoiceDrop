@@ -78,70 +78,70 @@
             "currency": "EUR"
         },          
         {
-            "bill": 10,
+            "bill": 12,
             "vendor": "EUROSPAR",
             "date": "2025-07-21",
             "gross_total": 12.54,
             "currency": "EUR"
         },          
         {
-            "bill": 12,
+            "bill": 13,
             "vendor": "HOFER KG",
             "date": "2025-07-22",
             "gross_total": 147.75,
             "currency": "EUR"
         },          
         {
-            "bill": 13,
+            "bill": 14,
             "vendor": "EUROSPAR",
             "date": "2025-07-22",
             "gross_total": 25.90,
             "currency": "EUR"
         },            
         {
-            "bill": 14,
+            "bill": 15,
             "vendor": "HOFER KG",
             "date": "2025-07-24",
             "gross_total": 89.86,
             "currency": "EUR"
         },          
         {
-            "bill": 15,
+            "bill": 16,
             "vendor": "SPAR",
             "date": "2025-07-24",
             "gross_total": 48.85,
             "currency": "EUR"
         },         
         {
-            "bill": 16,
+            "bill": 17,
             "vendor": "HOFER KG",
             "date": "2025-07-25",
             "gross_total": 40.60,
             "currency": "EUR"
         },         
         {
-            "bill": 17,
+            "bill": 18,
             "vendor": "EUROSPAR",
             "date": "2025-07-25",
             "gross_total": 6.98,
             "currency": "EUR"
         },              
         {
-            "bill": 18,
+            "bill": 19,
             "vendor": "EUROSPAR",
             "date": "2025-07-26",
             "gross_total": 16.92,
             "currency": "EUR"
         },    
         {
-            "bill": 19,
+            "bill": 20,
             "vendor": "Bäckerei Wienerroither GmbH",
             "date": "2025-07-26",
             "gross_total": 10.20,
             "currency": "EUR"
         },                       
         {
-            "bill": 20,
+            "bill": 21,
             "vendor": "MARTIN AUER",
             "date": "2025-08-01",
             "gross_total": 55.30,
