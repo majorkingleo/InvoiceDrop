@@ -2,7 +2,7 @@
     "bills": [
         {
             "bill": 1,
-            "vendor": "ÖBB",
+            "vendor": "ÖBB-personenverkehr ag",
             "date": "2025-07-31",
             "gross_total": 21.12,
             "currency": "EUR"
