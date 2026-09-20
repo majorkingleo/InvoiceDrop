@@ -24,7 +24,10 @@ Rules:
   the extracted text is a hint and may be corrupted.
 - A photographed receipt is narrow and long. Read it line by line, do not stop early.
 - On a receipt, the total is the final amount actually paid, not a subtotal, not a
-  promotional line and not a running balance.
+  promotional line and not a running balance. The total sits on the line the shop labels
+  SUMME, Gesamt, Total or Zu zahlen, and the payment line below it carries the same amount.
+  A savings note — "Ihre Ersparnis", "Sie sparen", "you saved" — is printed between those
+  two lines with a smaller amount, and it is never the total.
 - Use a dot as the decimal separator and no thousands separator.
 - Give dates as ISO 8601, YYYY-MM-DD.
 - A machine printed bill is read from its printed text. Disregard anything written on it by

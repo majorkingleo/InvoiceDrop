@@ -923,16 +923,27 @@ holder was already named.
   punctuation are folded away, and a vendor written between slashes is a regular
   expression that says which difference it forgives. Measured on the full suite,
   before and after: 19 passed and 17 failed, then 22 and 14. The vendor rows went
-  from 12 red to one — a second run of the same tree put it at three, so read the
-  number as "about two, and they move". The totals stopped being red as well; the
-  dates were always red under them and are now visible (13 rows), because a row
-  that fails on the vendor never reaches its date.
+  from 12 red to two or three, the count moving between runs.
+
+  The same day the totals stopped being the reason a row is red. The three receipts
+  that print an `Ihre Ersparnis` note under `SUMME` had been answered with the saved
+  amount on every run; the prompt now names that note and two of the three pages are
+  right three times out of three. Lebensmittel bill 8 still answers 3.36 for a 12.40
+  receipt, three times out of three, and the suite cannot show it: the row fails on
+  its date first. The measurements are in the Ollama section of
+  `docs/architecture.md`.
 
   What is left red on the vendor fails for one reason, and it is not a spelling:
   a name written on the receipt by hand is read as part of the vendor. The prompt
   rule against that was measured and does not work, see the Ollama section of
   `docs/architecture.md`. The rows are left red rather than pointed at a looser
   pattern, because `Hanni` is not what the receipt says.
+
+  A row is also not one failure. The check order is vendor, date, currency, total,
+  and the first failure ends the row, so a red vendor row says nothing about its
+  date and a red date row says nothing about its total. The 12 rows red in the last
+  run are nine dates, two handwritten vendors and one vendor that is not on the
+  paper at all.
 * **Multi-invoice documents: resolved as one bill per page.** The store, the test
   and the output all treat a page as a bill. A single invoice spread over two
   pages therefore yields two records, which is the known cost of the rule.

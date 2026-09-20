@@ -40,7 +40,11 @@ namespace {
 ///    handwriting even where it overlaps the printing. One change to what is
 ///    asked, bumped twice because the first wording had to be measured against
 ///    the document that prompted it.
-constexpr int kPromptVersion = 3;
+/// 4: the rule about totals names the savings line (2026-09-20). Three EUROSPAR
+///    receipts with an `Ihre Ersparnis` note below `SUMME` came back with the
+///    saved amount as the gross total — 9.58 for a 46.16 receipt, 3.36 for 12.40
+///    and 4.47 for 48.85 — and the stored answers are those.
+constexpr int kPromptVersion = 4;
 
 constexpr auto kSchema = R"SQL(
 CREATE TABLE IF NOT EXISTS documents (

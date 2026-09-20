@@ -438,6 +438,35 @@ Notes on the transport:
 * `/api/tags` is checked once before the first file, so a missing model produces
   one actionable line instead of the same failure per file.
 
+### The total and the savings note
+
+Three receipts in the Lebensmittel collection print the total twice, with a savings
+note on the line between the two:
+
+```
+SUMME:                       12,40
+
+Ihre Ersparnis: 3,36 EUR
+
+ZAHLUNG MASTERCARD           12,40
+```
+
+Measured 2026-09-20, the reply took the *saved* amount as the gross total on all
+three: 9.58 for a 46.16 receipt, 3.36 for 12.40 and 4.47 for 48.85. The rule about
+totals already said the total is "not a promotional line", which is what the note
+is, and the model still preferred it; the rule now says where the total sits (the
+line labelled `SUMME`, `Gesamt`, `Total` or `Zu zahlen`, repeated on the payment
+line) and what the note in between is.
+
+Measured with the new wording, one page at a time and three runs each: pages 6 and
+16 answer 46.16 and 48.85 three times out of three, having been wrong three times
+out of three before, and page 8 still answers 3.36 three times out of three even
+though its `SUMME: 12,40` is legible at the raster the model is given. That one page
+is left as a known wrong answer instead of being described further in the prompt,
+for the reason the offer-period wording was dropped: a wording that has to name one
+document does not generalise. Two of three is also why this wording is kept while
+the handwriting rule below is not.
+
 ### Handwriting on a printed bill
 
 The extraction prompt says that a machine printed bill is read from its printed
