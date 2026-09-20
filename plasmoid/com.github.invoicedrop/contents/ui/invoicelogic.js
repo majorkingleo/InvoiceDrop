@@ -129,31 +129,25 @@ function formatMoney(parts, locale) {
     return rendered.join(" + ");
 }
 
-/// Adds up one file's bills.
+/// Adds up a set of bills, one group per currency, in cents.
+///
+/// The arithmetic both totals share, so a file sum and a list sum cannot drift
+/// apart in the four things that matter: what is skipped, what is counted, what
+/// is added to what, and how it is rounded.
 ///
 /// Summed in cents, like the CLI does. Adding the amounts as they arrive gives
 /// 0.1 + 0.2 = 0.30000000000000004, and the widget would print the tail of it.
 ///
-/// `expected` comes from the file's own page count, not from the number of bills
-/// on screen, so a list that was cut to the history limit can tell that it is
-/// showing part of a file.
-///
-/// `money` carries the currencies and is what the row shows. `amount` is the same
-/// sum as a bare number, for a clipboard that was asked for no currency, and it is
-/// empty when the file mixes currencies: `10,00 + 5,00` is not money, so there the
-/// copy keeps the codes.
-function totalFor(bills, locale) {
+/// `counted` is how many bills went into the sum and `failed` how many were left
+/// out of it because the CLI could not read them, so a caller can say what the
+/// number covers without walking the bills a second time.
+function sumAmounts(bills) {
     const parts = [];
-    let expected = 0;
     let counted = 0;
     let failed = 0;
 
     for (let i = 0; i < bills.length; ++i) {
         const bill = bills[i];
-
-        const pages = bill.bill_count !== undefined ? Number(bill.bill_count) : 0;
-        if (pages > expected)
-            expected = pages;
 
         if (bill.status !== "ok") {
             failed += 1;
@@ -182,18 +176,83 @@ function totalFor(bills, locale) {
         counted += 1;
     }
 
+    return { parts: parts, counted: counted, failed: failed };
+}
+
+/// The sum of one set of groups as the two forms a row needs, given what the sum
+/// was expected to cover.
+///
+/// `money` carries the currencies and is what the row shows. `amount` is the same
+/// sum as a bare number, for a clipboard that was asked for no currency, and it is
+/// empty when the set mixes currencies: `10,00 + 5,00` is not money, so there the
+/// copy keeps the codes.
+function totalOf(sum, expected, locale) {
+    return {
+        bills: expected,
+        expected: expected,
+        counted: sum.counted,
+        failed: sum.failed,
+        complete: sum.counted > 0 && sum.failed === 0 && sum.counted >= expected,
+        money: formatMoney(sum.parts, locale),
+        amount: sum.parts.length === 1
+            ? bareMoneyText(sum.parts[0].cents / 100, locale)
+            : ""
+    };
+}
+
+/// Adds up one file's bills.
+///
+/// `expected` comes from the file's own page count, not from the number of bills
+/// on screen, so a list that was cut to the history limit can tell that it is
+/// showing part of a file.
+function totalFor(bills, locale) {
+    let expected = 0;
+
+    for (let i = 0; i < bills.length; ++i) {
+        const pages = bills[i].bill_count !== undefined ? Number(bills[i].bill_count) : 0;
+        if (pages > expected)
+            expected = pages;
+    }
+
     if (expected < bills.length)
         expected = bills.length;
 
-    return {
-        bills: bills.length,
-        expected: expected,
-        counted: counted,
-        failed: failed,
-        complete: counted > 0 && failed === 0 && counted >= expected,
-        money: formatMoney(parts, locale),
-        amount: parts.length === 1 ? bareMoneyText(parts[0].cents / 100, locale) : ""
-    };
+    return totalOf(sumAmounts(bills), expected, locale);
+}
+
+/// What the whole list adds up to, for the row at the foot of the popup.
+///
+/// The same sum as a file's, over every bill on screen instead of one file's.
+/// The coverage is the number of rows in the list rather than a page count, and
+/// that is not the same thing: eight drops of one page each are eight bills, and
+/// no document has a page count that could contradict it. So a list is complete
+/// when every bill it shows went into the sum, and `failed` counts the ones the
+/// CLI could not read.
+///
+/// The sum follows the list, not the store: a file dropped twice is on screen
+/// twice and is in the total twice. That is what the row claims — over all listed
+/// positions — and a number that quietly folded two of them together would
+/// disagree with the cards above it.
+function listTotalFor(bills, locale) {
+    const listed = bills ? bills.length : 0;
+    return totalOf(sumAmounts(bills || []), listed, locale);
+}
+
+/// How many documents the list holds.
+///
+/// Runs of bills sharing a file, not distinct keys: the list is newest first, so
+/// the same file dropped twice appears as two runs, and a count that folded them
+/// together would say one document where two are on screen.
+function fileCount(bills) {
+    if (!bills || bills.length === 0)
+        return 0;
+
+    let count = 1;
+    for (let i = 1; i < bills.length; ++i) {
+        if (fileKey(bills[i - 1]) !== fileKey(bills[i]))
+            count += 1;
+    }
+    return count;
 }
 
 /// Subtotals per file, as an array parallel to `bills`.

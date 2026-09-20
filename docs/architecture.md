@@ -374,6 +374,19 @@ count. It formats in the locale it is handed rather than calling `Qt.locale()`
 itself, which is what lets `tst_plasmoid.qml` pin `de_DE` and assert on the
 separators.
 
+The popup draws a second total at its foot, over every bill on screen rather than
+over one document. Without it, five dropped receipts are five cards and five
+amounts and no sum at all, because a file with a single bill deliberately gets no
+row of its own. It is summoned the same way as a file's total and differs from it
+in two places. Its coverage is the number of rows in the list, not a page count:
+eight drops of one page each are eight bills, and no document's page count could
+contradict that. And it adds up the list rather than the store, so a file dropped
+twice appears twice in the total, which is what the cards above it show. The
+rounding and the currency rules are shared with the file total — `sumAmounts`
+holds them, `totalOf` renders them — so the two rows cannot drift apart, and
+`fileCount` decides whether the row has anything to add over the file rows it
+would sit under.
+
 ## Process boundaries
 
 Every path that crosses a process boundary is made absolute first, because the

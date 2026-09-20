@@ -4,15 +4,18 @@ import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents
 
 /**
- * What one file adds up to, drawn under the last bill of that file.
+ * A sum drawn as a row: the file total under the last bill of a file, and the
+ * list total at the foot of the popup, which is the same row with a heading.
  *
  * A file that holds a single bill gets no row: the total would be the amount
  * already on the card above, and repeating it makes the list longer without
- * making it clearer.
+ * making it clearer. The list total follows the same rule from the other side:
+ * it is drawn only when the list holds more than one document, because over a
+ * single one it would be the file's total said twice.
  *
  * The count next to the sum is not decoration. `179,76 EUR` on its own claims
  * nothing; `179,76 EUR  3 Belege` claims that three bills are inside it, and
- * when the file holds more than were read the row says so instead of quietly
+ * when the set holds more than were read the row says so instead of quietly
  * summing the part it has.
  *
  * Clicking the row copies the sum. The row is one number and one action, and the
@@ -25,6 +28,11 @@ Item {
     /// which is not `null`, and reading `.complete` off it would abort the card
     /// before it draws. Both are folded into one check here.
     property var total: null
+
+    /// What the row is a total of, when it needs saying: `Gesamt` for the list,
+    /// empty for a file, where the cards it sits under answer the question
+    /// already. It is the only difference between the two rows.
+    property string title: ""
 
     /// Set for a moment after a copy, and shown in place of the count: the row is
     /// one line high, so the confirmation takes the note's place rather than
@@ -74,10 +82,15 @@ Item {
         return sum.money;
     }
 
-    /// What the row says in its left half: the coverage, or the confirmation
-    /// after a copy. There is one place for it and the confirmation wins, because
-    /// it is about what just happened and the coverage is about what is there.
-    readonly property string caption: sum.notice.length > 0 ? sum.notice : sum.note
+    /// What the row says in its left half: the heading when there is one, the
+    /// coverage after it, or the confirmation after a copy. There is one place
+    /// for it and the confirmation wins, because it is about what just happened
+    /// and the coverage is about what is there.
+    readonly property string caption: {
+        if (sum.notice.length > 0)
+            return sum.notice;
+        return sum.title.length > 0 ? (sum.title + "  ·  " + sum.note) : sum.note;
+    }
 
     implicitHeight: layout.implicitHeight + Kirigami.Units.smallSpacing * 1.5
 

@@ -453,6 +453,20 @@ one bill, and with the count beside it. A file that was cut by the list's histor
 limit is summed over the part that is on screen and says so, since the file's own
 page count is in every reply.
 
+There are two rows, and they answer different questions. The row under a file is
+what that document adds up to. The row at the foot of the popup, headed `Gesamt`,
+is what every bill on screen adds up to, whichever file it came from: the number
+a list of single page files otherwise never gets, because a one-bill file draws no
+row of its own. It appears as soon as the list holds a second document, since over
+a single document it would repeat the file's row.
+
+The list row is summed over the list and not over the store. A file dropped twice
+is on screen twice and is in the total twice, and the coverage beside the number
+is the number of rows in the list rather than a page count, because a list is not
+a document: eight drops of one page each are eight bills, and no page count could
+contradict that. Both rows are summed the same way, both say how many bills the
+number covers, and both copy the sum when clicked.
+
 ```fish
 kpackagetool6 --type Plasma/Applet --install plasmoid/com.github.invoicedrop
 plasmawindowed com.github.invoicedrop     # try it in a window first

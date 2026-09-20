@@ -771,11 +771,76 @@ What this found:
   set. The two rows can therefore be loaded outside Plasma; what cannot be done
   there is the painting and the click.
 
+  Corrected 2026-09-20, while the list sum was added: the import is not what
+  brings `i18n` in, and the conclusion above holds only for the loading. A probe
+  file that imports `org.kde.kirigami` and instantiates `SumRow.qml` from the
+  package still sees `typeof i18n` as `undefined` and gets `ReferenceError` from
+  both `i18n` and `i18np` in there (see **The sum over the list**). The wording of
+  a `.qml` file therefore cannot be run outside Plasma, whatever the importing
+  file imports; only the arithmetic the two rows read can be.
+
 Not verified, and worth saying so: how it looks. The markup, the sums and the
 clipboard are covered, by the suite and by the paste above, but nothing in this
 repository can assert that the row is drawn where it should be or that a click on
 it lands — no test drives a `MouseArea`, and the widget was only installed and
 the shell restarted.
+
+---
+
+## The sum over the list
+
+A file total answered what a collection PDF adds up to. Nothing answered what the
+popup adds up to: five dropped receipts were five cards and five amounts, and a
+list of single page files got no sum at all, because a one-bill file draws no row
+of its own. `Logic.listTotalFor` now sums every listed bill, `Logic.fileCount`
+decides whether the row has anything to add, and the popup draws it at its foot.
+
+What this found:
+
+- **A second row with no words between them is unreadable.** Two identical tinted
+  rows, one under a file and one under the list, are the same picture when both
+  cover the same three bills, and the count does not separate them either. The row
+  therefore carries an optional heading, `Gesamt`, which is the whole difference
+  between the two uses.
+- **The row was called `FileSum.qml`, and that stopped being true.** It is
+  `SumRow.qml` now, with a `title` property that is empty for a file and `Gesamt`
+  for the list. The alternative — a second component with the same tint, the same
+  clipboard and the same click — was two places to fix the next time a sum row
+  changes.
+- **Over one document the row is hidden.** The number would be the file row's
+  number, and two rows showing the same figure read as two different sums until
+  the reader counts the bills. `Logic.fileCount` counts runs and not distinct
+  paths, so the same file dropped twice on screen is two documents there, exactly
+  as it is two runs in `subtotalsFor`.
+- **`expected` means something else for a list than for a file.** A file is
+  incomplete when pages are missing, so its coverage comes from `bill_count`. A
+  list cannot be incomplete that way: its coverage is the number of rows on
+  screen, and it is incomplete when one of those rows did not go into the sum.
+- **The sum follows the list, not the store.** Both would be defensible and they
+  are not the same number after a file is dropped twice. The row claims to add up
+  what is listed, so it adds up what is listed, and the cards above it agree.
+- **The two totals share their arithmetic.** `sumAmounts` holds the four
+  decisions — what is skipped, what is counted, what may be added to what, and
+  rounding in cents — and `totalOf` turns a set of groups into the one object both
+  rows read. A second copy of that loop would have been a second place for the
+  0.1 + 0.2 tail to come back.
+
+Measured, and one earlier note corrected:
+
+- The two rows were loaded offscreen with `x/sumrow-probe.qml` and the real values
+  came out: `156,41 EUR` from two bills of 65,50 and 90,91, `Gesamt  ·  ` for the
+  list row, and `clip 156,41` where the settings ask for no currency.
+- **The phase 9 note that importing `org.kde.kirigami` brings `i18n` in is
+  wrong.** The probe imports it and both `i18n` and `i18np` are still `undefined`
+  inside `SumRow.qml`: `typeof i18n` answered `undefined` and the two calls threw
+  `ReferenceError`, on 2026-09-20. So the wording of any row still cannot be
+  checked outside Plasma, and the plasmoid suite checks the arithmetic of the list
+  sum and not what the row says about it.
+- `plasmawindowed com.github.invoicedrop` was started for ten seconds against the
+  changed package and reported no QML error, which is what says the popup itself
+  still loads. What it could not do is show the row: a fresh window has no bills
+  in it, and the row is hidden until the list holds two documents. Neither the
+  place it is painted nor a click on it has been seen.
 
 ---
 
@@ -841,7 +906,9 @@ from the build tree.
   forgetting one, and surviving a reopen.
 * `tst_daemon` — the inbox watcher's settle delay and its handled list, and the
   notification text. No bus and no model needed.
-* `tst_plasmoid.qml` — the widget's command builder and reply parser, run under
+* `tst_plasmoid.qml` — the widget's command builder, its reply parser and its
+  arithmetic: the per file totals, the list total at the foot of the popup, and
+  the file count that decides whether that row is drawn at all. Run under
   `qmlscene6`.
 * `tst_totals` — the per file sums: mixed currencies, a bill that failed inside a
   total that still adds up, a file cut by the page limit, and cent rounding.

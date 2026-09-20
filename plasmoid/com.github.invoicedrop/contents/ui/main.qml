@@ -35,6 +35,19 @@ PlasmoidItem {
     /// what keeps it correct when the history limit cuts a file in half.
     readonly property var subtotals: Logic.subtotalsFor(bills, Qt.locale())
 
+    /// What every listed bill adds up to, for the row at the foot of the popup,
+    /// or null while the list holds a single document.
+    ///
+    /// Over one document the file's own row already says this number, and two
+    /// rows with the same amount in them read as two different sums until one
+    /// counts the bills. So the row appears when the list reaches a second
+    /// document, which is the point where it stops repeating the file row — and
+    /// where a list of several single page files, none of which gets a file row
+    /// of its own, gets a total at all.
+    readonly property var listTotal: Logic.fileCount(bills) > 1
+        ? Logic.listTotalFor(bills, Qt.locale())
+        : null
+
     preferredRepresentation: fullRepresentation
 
     // --------------------------------------------------------------- pipeline
@@ -200,7 +213,7 @@ PlasmoidItem {
                         onClicked: root.openBill = modelData
                     }
 
-                    FileSum {
+                    SumRow {
                         Layout.fillWidth: true
                         visible: root.subtotals[index] !== null
                                  && root.subtotals[index] !== undefined
@@ -211,6 +224,19 @@ PlasmoidItem {
                         showCopyNotice: root.showCopyNotice
                     }
                 }
+            }
+
+            /// The one row that is about the whole popup rather than one file,
+            /// so it sits outside the list and stays put while the cards scroll
+            /// under it. `Gesamt` is its heading because the file rows above it
+            /// carry none: a row that sums everything has to say so.
+            SumRow {
+                Layout.fillWidth: true
+                visible: root.listTotal !== null
+                total: root.listTotal
+                title: i18n("Gesamt")
+                withoutCurrency: root.copyWithoutCurrency
+                showCopyNotice: root.showCopyNotice
             }
 
             PlasmaComponents.Label {

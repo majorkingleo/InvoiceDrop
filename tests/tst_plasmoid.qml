@@ -202,6 +202,59 @@ Item {
         check("the same file twice is two runs",
               [twice[0], twice[1], twice[2]], [null, null, null]);
 
+        // --------------------------------------------------------- the list sum
+        // The row at the foot of the popup. It is about the whole list rather
+        // than one file, so its coverage is the number of rows on screen and not
+        // a page count: eight drops of one page each are eight bills, and no
+        // document has a page count that could contradict that.
+        const everyListed = Logic.listTotalFor(tanken.concat([bill("oebb.pdf", 1, 1, 80.64)]),
+                                               german);
+        check("the list sum crosses files", everyListed.money, "258,40 EUR");
+        check("the coverage is the number of rows",
+              [everyListed.counted, everyListed.expected], [4, 4]);
+        check("a list that was read in full is complete", everyListed.complete, true);
+        check("the list sum has a bare form", everyListed.amount, "258,40");
+
+        const singleRow = Logic.listTotalFor([bill("a.pdf", 1, 1, 11.91)], german);
+        check("one listed bill still sums", singleRow.money, "11,91 EUR");
+
+        // One document on screen is the case the row is hidden for: the file's
+        // own row says the same number, and `fileCount` is what decides that.
+        check("one document is one run", Logic.fileCount(tanken), 1);
+        check("two documents are two runs",
+              Logic.fileCount([bill("a.pdf", 1, 1, 1), bill("b.pdf", 1, 1, 2)]), 2);
+        check("the same file twice is two runs on screen, not one",
+              Logic.fileCount([bill("a.pdf", 1, 1, 1), bill("b.pdf", 1, 1, 2),
+                               bill("a.pdf", 1, 1, 3)]), 3);
+        check("an empty list holds no document", Logic.fileCount([]), 0);
+
+        const oneUnread = Logic.listTotalFor([
+            bill("a.pdf", 1, 2, 10.00),
+            { path: "a.pdf", file: "a.pdf", bill: 2, bill_count: 2, status: "error" }
+        ], german);
+        check("a listed bill that was not read is counted as such",
+              [oneUnread.counted, oneUnread.failed, oneUnread.complete], [1, 1, false]);
+        check("and it is left out of the sum", oneUnread.money, "10,00 EUR");
+        check("the coverage is still the whole list",
+              oneUnread.expected, 2);
+
+        const mixedList = Logic.listTotalFor([
+            { path: "a.pdf", file: "a.pdf", bill: 1, bill_count: 1, status: "ok",
+              gross_total: 10, currency: "EUR" },
+            { path: "b.pdf", file: "b.pdf", bill: 1, bill_count: 1, status: "ok",
+              gross_total: 5, currency: "USD" }
+        ], german);
+        check("the list never adds two currencies together",
+              mixedList.money, "10,00 EUR + 5,00 USD");
+        check("and has no bare form", mixedList.amount, "");
+
+        check("an empty list sums to nothing",
+              [Logic.listTotalFor([], german).counted,
+               Logic.listTotalFor([], german).complete], [0, false]);
+        check("an empty list covers nothing", Logic.listTotalFor([], german).expected, 0);
+        check("an absent list is not an error",
+              Logic.listTotalFor(null, german).money, "");
+
         // ------------------------------------------------------------ one bill
         check("an amount for the desktop locale",
               Logic.moneyText(11.91, "EUR", german), "11,91 EUR");
