@@ -79,6 +79,38 @@ const char *kDatePrompt = R"(You read the issue date of a business document.
 /// a date or NONE, and `normaliseDate` is what accepts or rejects it.
 const char *kDateQuestion = "What is the issue date of this document?";
 
+/// The prompt for the question that reads the gross total.
+///
+/// This exists for the reason the date question does: the extraction reply does
+/// not leave the field empty when it cannot read it, it puts a number in it, and
+/// on a receipt with a savings note the number it puts there is the note. Measured
+/// on the three receipts of `GuSp_SoLa2025_Lebensmittel_Rechnungen.pdf` that print
+/// `Ihre Ersparnis` under `SUMME` — 46.16 with 9.58 saved, 12.40 with 3.36, 48.85
+/// with 4.47 — the reply answered the saved amount on all three.
+///
+/// Two other wordings were tried and thrown away. "The final amount payable"
+/// answered 9.58 on a page whose reply had been right, and the payment line — which
+/// looks like the same amount — is not: page 11 of that document carries a
+/// `Bargeldauszahlung EUR 200,00`, so its `Mastercard EUR 262,62` is 200 more than
+/// the bill, and page 18 pays 6,98 in cash and prints a rounded 7. The line the
+/// shop labels as its total is the one thing on the paper that always means the
+/// total. That wording answered 46,16 / 12,40 / 62,62 / 6,98 / 55,30 / 48,85 on
+/// three runs out of three each, across the pages that the reply and the other two
+/// wordings each get wrong. Measurement in `docs/architecture.md`.
+const char *kTotalPrompt = R"(You read the total printed on a business document.
+- The total is the amount on the line the shop labels SUMME, Zw-Summe, Gesamtsumme, Gesamt,
+  Total or Zu zahlen. On a receipt that line comes at the end of the list of items.
+- If the document shows no such line, answer NONE.
+- Answer with one amount and nothing else.
+)";
+
+/// The follow-up question for the total: it names the printed label rather than the
+/// field, which is what makes it answerable. The answer is an amount or NONE, and
+/// `amountFromAnswer` is what accepts or rejects it. NONE means the reply's own
+/// total stands, so a document without such a line is not made worse.
+const char *kTotalQuestion = "Which amount is printed on the line labelled \"SUMME\"? Answer "
+                             "with the amount and nothing else.";
+
 /// Fits a duration into the sentence the user reads.
 QString seconds(qint64 milliseconds)
 {
@@ -141,6 +173,28 @@ void logRequest(const OllamaOptions &options,
     Log::block("ai", QStringLiteral("user prompt, %1 characters").arg(user.size()), user);
 }
 
+/// Reads the answer to the total question.
+///
+/// The answer has to be one amount, and nothing else is accepted. `parseAmount`
+/// keeps every digit it is handed, so a sentence naming two amounts —
+/// `SUMME 12,40, Ersparnis 3,36` — would be glued into `12,403,36` and read as a
+/// third one. Two numbers in the answer therefore mean "not an answer", and the
+/// total the reply carried stands instead.
+std::optional<double> amountFromAnswer(const QString &answer)
+{
+    static const QRegularExpression number(QStringLiteral("[0-9][0-9.,']*"));
+
+    QStringList found;
+    QRegularExpressionMatchIterator matches = number.globalMatch(answer);
+    while (matches.hasNext())
+        found.append(matches.next().captured(0));
+
+    if (found.size() != 1)
+        return std::nullopt;
+
+    return parseAmount(found.first());
+}
+
 } // namespace
 
 OllamaOptions::OllamaOptions()
@@ -151,6 +205,15 @@ OllamaOptions::OllamaOptions()
     url = host.isEmpty() ? QStringLiteral("http://127.0.0.1:11434") : host;
     if (!url.startsWith(QStringLiteral("http")))
         url.prepend(QStringLiteral("http://"));
+
+    // There is no Ollama convention for the model, so this variable is ours. It is
+    // here because `tst_bills` builds its own options and has no flag to pass one:
+    // without it, comparing two models means editing `kDefaultModel` and rebuilding
+    // between the runs. The CLI's `--model` defaults to whatever this chose.
+    const QString chosen = QProcessEnvironment::systemEnvironment().value(
+        QStringLiteral("INVOICEDROP_MODEL"));
+    if (!chosen.isEmpty())
+        model = chosen;
 }
 
 OllamaClient::OllamaClient(OllamaOptions options) : m_options(std::move(options))
@@ -159,29 +222,30 @@ OllamaClient::OllamaClient(OllamaOptions options) : m_options(std::move(options)
         m_options.url.chop(1);
 }
 
-QString OllamaClient::askDate(const QString &text, const QList<QByteArray> &jpegPages) const
+QString OllamaClient::askWithoutSchema(const QString &field,
+                                       const QString &prompt,
+                                       const QString &question,
+                                       const QString &text,
+                                       const QList<QByteArray> &jpegPages) const
 {
     // Whatever the extraction was handed, this asks about: page images, the text
     // layer, or both. A document that arrived as text has no image to send, and
-    // skipping the question for it would leave the date to the extraction reply,
-    // which is the source this question exists to check.
+    // skipping the question for it would leave the field to the extraction reply,
+    // which is the source these questions exist to check.
+    QString asked = question;
     const QString carried = text.trimmed();
-    if (carried.isEmpty() && jpegPages.isEmpty())
-        return {};
-
-    QString question = QString::fromUtf8(kDateQuestion);
     if (!carried.isEmpty()) {
-        question += QStringLiteral("\n\n--- extracted text, may be corrupted ---\n");
-        question += carried;
+        asked += QStringLiteral("\n\n--- extracted text, may be corrupted ---\n");
+        asked += carried;
     }
 
     QJsonObject system;
     system.insert(QStringLiteral("role"), QStringLiteral("system"));
-    system.insert(QStringLiteral("content"), QString::fromUtf8(kDatePrompt));
+    system.insert(QStringLiteral("content"), prompt);
 
     QJsonObject user;
     user.insert(QStringLiteral("role"), QStringLiteral("user"));
-    user.insert(QStringLiteral("content"), question);
+    user.insert(QStringLiteral("content"), asked);
 
     if (!jpegPages.isEmpty()) {
         QJsonArray images;
@@ -203,33 +267,44 @@ QString OllamaClient::askDate(const QString &text, const QList<QByteArray> &jpeg
     body.insert(QStringLiteral("stream"), false);
     body.insert(QStringLiteral("think"), m_options.think);
     body.insert(QStringLiteral("keep_alive"), m_options.keepAlive);
-    // No `format`, which is the whole point of this request: the schema is what
-    // loses the date, and a schema narrowed to the date alone answered `21`.
+    // No `format`, which is the whole point of these requests: a schema is what
+    // loses the field, and a schema narrowed to the one field was worse still.
     body.insert(QStringLiteral("options"), options);
 
-    Log::step("ai", QStringLiteral("no labelled date in the text: asking for the date on its own, "
-                                   "without a schema"));
-    Log::block("ai", QStringLiteral("date prompt, %1 characters")
-                         .arg(QString::fromUtf8(kDatePrompt).size()),
-               QString::fromUtf8(kDatePrompt));
-    Log::block("ai", QStringLiteral("date question, %1 characters").arg(question.size()),
-               question);
+    Log::block("ai", QStringLiteral("%1 prompt, %2 characters")
+                         .arg(field)
+                         .arg(prompt.size()),
+               prompt);
+    Log::block("ai", QStringLiteral("%1 question, %2 characters").arg(field).arg(asked.size()),
+               asked);
 
     QString transportError;
     const QString reply = request("POST", QStringLiteral("/api/chat"),
                                   QJsonDocument(body).toJson(QJsonDocument::Compact),
                                   m_options.timeoutMs, &transportError);
     if (reply.isEmpty()) {
-        Log::warn("ai", QStringLiteral("the date question failed: %1").arg(transportError));
+        Log::warn("ai", QStringLiteral("the %1 question failed: %2").arg(field, transportError));
         return {};
     }
 
-    const QString content = QJsonDocument::fromJson(reply.toUtf8())
-                                .object()
-                                .value(QStringLiteral("message"))
-                                .toObject()
-                                .value(QStringLiteral("content"))
-                                .toString();
+    return QJsonDocument::fromJson(reply.toUtf8())
+        .object()
+        .value(QStringLiteral("message"))
+        .toObject()
+        .value(QStringLiteral("content"))
+        .toString();
+}
+
+QString OllamaClient::askDate(const QString &text, const QList<QByteArray> &jpegPages) const
+{
+    if (text.trimmed().isEmpty() && jpegPages.isEmpty())
+        return {};
+
+    Log::step("ai", QStringLiteral("no labelled date in the text: asking for the date on its own, "
+                                   "without a schema"));
+    const QString content = askWithoutSchema(QStringLiteral("date"),
+                                             QString::fromUtf8(kDatePrompt),
+                                             QString::fromUtf8(kDateQuestion), text, jpegPages);
 
     // The answer is prose or a bare date, so it goes through the same normaliser
     // the text layer uses. That is deliberate: it finds a date inside a sentence,
@@ -241,6 +316,27 @@ QString OllamaClient::askDate(const QString &text, const QList<QByteArray> &jpeg
                          .arg(content.trimmed().size())
                          .arg(date.isEmpty() ? QStringLiteral("no date in it") : date));
     return date;
+}
+
+std::optional<double> OllamaClient::askTotal(const QString &text,
+                                            const QList<QByteArray> &jpegPages) const
+{
+    if (text.trimmed().isEmpty() && jpegPages.isEmpty())
+        return std::nullopt;
+
+    Log::step("ai", QStringLiteral("asking for the amount on the SUMME line on its own, without a "
+                                   "schema"));
+    const QString content = askWithoutSchema(QStringLiteral("total"),
+                                             QString::fromUtf8(kTotalPrompt),
+                                             QString::fromUtf8(kTotalQuestion), text, jpegPages);
+
+    const std::optional<double> total = amountFromAnswer(content);
+    Log::model("ai", QStringLiteral("total answer: %1 characters, %2")
+                         .arg(content.trimmed().size())
+                         .arg(total.has_value()
+                                  ? QString::number(*total, 'f', 2)
+                                  : QStringLiteral("no single amount in it")));
+    return total;
 }
 
 QString OllamaClient::request(const QByteArray &method,
@@ -412,6 +508,8 @@ bool OllamaClient::analyse(const QString &text,
         return false;
 
     m_dateAsked = false;
+    m_totalAsked = false;
+    m_totalCorrected = false;
 
     if (text.trimmed().isEmpty() && jpegPages.isEmpty()) {
         if (error)
@@ -517,6 +615,72 @@ bool OllamaClient::analyse(const QString &text,
                                                         "unverified")
                                              .arg(fromReply));
                 }
+            }
+
+            // Third source for a field the reply cannot be trusted with, and the
+            // same shape as the date: the total is read off the line the shop
+            // labelled as its total, by a question of its own in a request that
+            // carries no schema. The answer is used when it is a single amount;
+            // NONE — no such line — leaves the reply's own total standing, which is
+            // the safe direction.
+            const std::optional<double> fromReplyTotal = parsed.grossTotal;
+            QElapsedTimer totalTimer;
+            totalTimer.start();
+            std::optional<double> askedTotal = askTotal(text, jpegPages);
+
+            // One answer is not enough to overrule the reply. The question was
+            // measured contradicting *itself*: on page 6 of the Lebensmittel
+            // collection it answered the savings note once in three runs, where the
+            // reply had the total right all three times. So a disagreement buys a
+            // second asking, and the reply is replaced only when both answers say
+            // the same thing. On page 8 both say 12,40 against a reply of 3,36, and
+            // on page 6 the second answer is the total and the reply stands.
+            if (askedTotal.has_value()
+                && (!fromReplyTotal.has_value()
+                    || qAbs(*fromReplyTotal - *askedTotal) >= 0.005)) {
+                Log::step("ai",
+                          QStringLiteral("the SUMME line reads %1 where the reply carried %2: "
+                                         "asking once more before believing it")
+                              .arg(QString::number(*askedTotal, 'f', 2),
+                                   fromReplyTotal.has_value()
+                                       ? QString::number(*fromReplyTotal, 'f', 2)
+                                       : QStringLiteral("no total")));
+                const std::optional<double> second = askTotal(text, jpegPages);
+                if (!second.has_value() || qAbs(*second - *askedTotal) >= 0.005) {
+                    Log::step("ai", QStringLiteral("the second answer is %1, so the reply's total "
+                                                   "stands")
+                                           .arg(second.has_value()
+                                                    ? QString::number(*second, 'f', 2)
+                                                    : QStringLiteral("nothing usable")));
+                    askedTotal.reset();
+                }
+            }
+            m_lastInferenceMs += totalTimer.elapsed();
+
+            if (askedTotal.has_value()) {
+                m_totalAsked = true;
+                m_totalCorrected = !fromReplyTotal.has_value()
+                    || qAbs(*fromReplyTotal - *askedTotal) >= 0.005;
+                parsed.grossTotal = askedTotal;
+
+                if (m_totalCorrected) {
+                    // Loud on purpose. A total that changed because the reply had
+                    // read a savings note is the one correction in this file that a
+                    // user would otherwise never notice.
+                    Log::warn("ai",
+                              QStringLiteral("the SUMME line reads %1, the extraction reply "
+                                             "carried %2: using %1")
+                                  .arg(QString::number(*askedTotal, 'f', 2),
+                                       fromReplyTotal.has_value()
+                                           ? QString::number(*fromReplyTotal, 'f', 2)
+                                           : QStringLiteral("no total at all")));
+                } else {
+                    Log::step("ai", QStringLiteral("the SUMME line agrees with the reply: %1")
+                                           .arg(QString::number(*askedTotal, 'f', 2)));
+                }
+            } else {
+                Log::step("ai", QStringLiteral("no SUMME line was answered, so the reply's total "
+                                               "stands unverified"));
             }
 
             *invoice = parsed;

@@ -70,6 +70,12 @@ public:
     /// so a bill that took two requests is not read as one that took a single one.
     bool dateAskedSeparately() const { return m_dateAsked; }
 
+    /// True when the gross total of the last `analyse` came from a question of its
+    /// own and differs from what the extraction reply carried. Reported as a note:
+    /// a total that changed because the reply had read a savings note is exactly
+    /// the kind of correction that should not be silent.
+    bool totalCorrected() const { return m_totalCorrected; }
+
 private:
     /// The request body as an object, so the same value can be serialised for the
     /// wire and read back for `--debug`. A second builder for the log would have
@@ -87,6 +93,23 @@ private:
     /// which names a day and nothing else, cannot come out of here as a date.
     QString askDate(const QString &text, const QList<QByteArray> &jpegPages) const;
 
+    /// Asks for the gross total on its own, without a schema, and returns the
+    /// amount it answered. Empty when the answer was not a single amount, in which
+    /// case the reply's own total stands.
+    std::optional<double> askTotal(const QString &text, const QList<QByteArray> &jpegPages) const;
+
+    /// One question about one field, in a request that carries no `format`.
+    ///
+    /// `askDate` and `askTotal` differ in their prompt and in what they make of
+    /// the answer, not in how the request is built, so the building lives here.
+    /// The request carries whatever the extraction carried — page images, the text
+    /// layer, or both — because a document that arrived as text has no image.
+    QString askWithoutSchema(const QString &field,
+                             const QString &prompt,
+                             const QString &question,
+                             const QString &text,
+                             const QList<QByteArray> &jpegPages) const;
+
     QString request(const QByteArray &method,
                     const QString &path,
                     const QByteArray &payload,
@@ -96,6 +119,8 @@ private:
     OllamaOptions m_options;
     qint64 m_lastInferenceMs = 0;
     bool m_dateAsked = false;
+    bool m_totalAsked = false;
+    bool m_totalCorrected = false;
 };
 
 } // namespace InvoiceDrop

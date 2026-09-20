@@ -927,11 +927,14 @@ holder was already named.
 
   The same day the totals stopped being the reason a row is red. The three receipts
   that print an `Ihre Ersparnis` note under `SUMME` had been answered with the saved
-  amount on every run; the prompt now names that note and two of the three pages are
-  right three times out of three. Lebensmittel bill 8 still answers 3.36 for a 12.40
-  receipt, three times out of three, and the suite cannot show it: the row fails on
-  its date first. The measurements are in the Ollama section of
-  `docs/architecture.md`.
+  amount on every run. Naming that note in the prompt fixed two of the three pages
+  and never the third, so the total is now read by a question of its own, the way
+  the issue date is — asking for the amount on the line the shop labelled as its
+  total, and believing it only when a second asking agrees. Measured afterwards over
+  the whole collection, twice, one page at a time: 21 of 21 totals right, where the
+  reply alone was right on 20. Two other wordings of that question were measured and
+  thrown away, one of which answered a cash withdrawal. The measurements are in the
+  Ollama section of `docs/architecture.md`.
 
   What is left red on the vendor fails for one reason, and it is not a spelling:
   a name written on the receipt by hand is read as part of the vendor. The prompt
@@ -941,8 +944,8 @@ holder was already named.
 
   A row is also not one failure. The check order is vendor, date, currency, total,
   and the first failure ends the row, so a red vendor row says nothing about its
-  date and a red date row says nothing about its total. The 12 rows red in the last
-  run are nine dates, two handwritten vendors and one vendor that is not on the
+  date and a red date row says nothing about its total. The 11 rows red in the last
+  run are eight dates, two handwritten vendors and one vendor that is not on the
   paper at all.
 * **Multi-invoice documents: resolved as one bill per page.** The store, the test
   and the output all treat a page as a bill. A single invoice spread over two

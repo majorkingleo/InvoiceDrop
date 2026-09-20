@@ -44,7 +44,20 @@ namespace {
 ///    receipts with an `Ihre Ersparnis` note below `SUMME` came back with the
 ///    saved amount as the gross total — 9.58 for a 46.16 receipt, 3.36 for 12.40
 ///    and 4.47 for 48.85 — and the stored answers are those.
-constexpr int kPromptVersion = 4;
+/// 5: the gross total is taken from a question of its own (2026-09-20), the way
+///    the issue date already is. Stored answers carry what the extraction reply
+///    put in the field, and on those three receipts that is the saved amount.
+/// 6, 7: the wording of that question, twice over. "The final amount payable" was
+///    measured answering the savings note on a page where the reply had been
+///    right, and the payment line was measured answering a cash withdrawal: page
+///    11 of the Lebensmittel collection prints `Bargeldauszahlung EUR 200,00`, so
+///    the card line there is 262,62 for a 62,62 bill. What is asked for now is the
+///    amount on the line the shop labelled as its total. Each wording invalidates
+///    the answers the one before it stored.
+/// 8: that answer is believed only when a second asking agrees with it
+///    (2026-09-20). The question was measured contradicting itself on one receipt,
+///    so a stored total that came from a single answer may be the wrong one.
+constexpr int kPromptVersion = 8;
 
 constexpr auto kSchema = R"SQL(
 CREATE TABLE IF NOT EXISTS documents (

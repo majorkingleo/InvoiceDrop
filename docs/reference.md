@@ -276,7 +276,7 @@ invoicedrop *.pdf; and echo "alle gelesen"
 
 | Option | Effect |
 |--------|--------|
-| `--model NAME` | which Ollama model to use |
+| `--model NAME` | which Ollama model to use, default `$INVOICEDROP_MODEL` or `gemma4:latest` |
 | `--ollama-url URL` | base URL, defaults to `$OLLAMA_HOST` or `127.0.0.1:11434` |
 | `--timeout SEC` | how long to wait for one answer, default 300 |
 | `--think` | let a reasoning model deliberate first; slower, not more accurate |
@@ -747,6 +747,24 @@ Measured over the twelve real documents in `tests/testdata/`:
 `gemma4:latest` is the default. `--model` switches, nothing else changes. The
 first document of a run also pays the model load, which is why a single file
 takes about 2 s and the second one is faster.
+
+The same choice can be made for a whole session instead of per call:
+
+```fish
+set -x INVOICEDROP_MODEL minicpm-v:8b
+```
+
+That variable is what the `bills` suite reads. It builds its own options and takes
+no flag, so without it, running the suite against a second model means editing
+`kDefaultModel` and rebuilding between the two runs:
+
+```fish
+env INVOICEDROP_MODEL=minicpm-v:8b ctest --test-dir build -R bills
+```
+
+`--model` beats the variable. The store key carries the model, so an answer read by
+one model is never served for another, and the first run with a different model
+reads everything again.
 
 ## Troubleshooting
 

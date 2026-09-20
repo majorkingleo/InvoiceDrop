@@ -548,8 +548,10 @@ int runCli(const QStringList &arguments)
         QStringLiteral("code"), QStringLiteral("de"));
     const QCommandLineOption model(
         QStringLiteral("model"),
-        QStringLiteral("Ollama model. Must report the vision capability for scans and photos."),
-        QStringLiteral("name"), QString::fromUtf8(kDefaultModel));
+        QStringLiteral("Ollama model. Must report the vision capability for scans and photos. "
+                       "Defaults to $INVOICEDROP_MODEL or %1.")
+            .arg(QString::fromUtf8(kDefaultModel)),
+        QStringLiteral("name"), OllamaOptions().model);
     const QCommandLineOption ollamaUrl(
         QStringLiteral("ollama-url"),
         QStringLiteral("Ollama base URL. Defaults to $OLLAMA_HOST or 127.0.0.1:11434."),

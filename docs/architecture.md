@@ -454,18 +454,38 @@ ZAHLUNG MASTERCARD           12,40
 Measured 2026-09-20, the reply took the *saved* amount as the gross total on all
 three: 9.58 for a 46.16 receipt, 3.36 for 12.40 and 4.47 for 48.85. The rule about
 totals already said the total is "not a promotional line", which is what the note
-is, and the model still preferred it; the rule now says where the total sits (the
-line labelled `SUMME`, `Gesamt`, `Total` or `Zu zahlen`, repeated on the payment
-line) and what the note in between is.
+is, and the model still preferred it. Naming the note in that rule fixed two of the
+three pages, one page at a time, three runs each: pages 6 and 16 answered 46.16 and
+48.85 three times out of three, having been wrong three times out of three before,
+and page 8 kept answering 3.36 however the rule was worded.
 
-Measured with the new wording, one page at a time and three runs each: pages 6 and
-16 answer 46.16 and 48.85 three times out of three, having been wrong three times
-out of three before, and page 8 still answers 3.36 three times out of three even
-though its `SUMME: 12,40` is legible at the raster the model is given. That one page
-is left as a known wrong answer instead of being described further in the prompt,
-for the reason the offer-period wording was dropped: a wording that has to name one
-document does not generalise. Two of three is also why this wording is kept while
-the handwriting rule below is not.
+**So the total is read by a question of its own, the way the date is**, and the
+same two mistakes were made and measured before that question worked:
+
+* "What is the final amount payable?" answered the savings note on page 6, once in
+  three runs, where the reply had been right in all three.
+* The payment line looks like the total — it repeats it on these receipts — and it
+  is not. Page 11 prints `Bargeldauszahlung EUR 200,00` above `Mastercard EUR
+  262,62`, so its payment line is 200 more than the bill, and page 18 pays 6,98 in
+  cash and prints a rounded 7. Asking for the payment line answered 262,62 and 7.
+* Asking for the amount on the line the shop labelled as its total answered 46,16 /
+  12,40 / 62,62 / 6,98 / 55,30 / 48,85, three runs out of three on each of those
+  pages — the pages the reply and the two other wordings each get wrong between
+  them.
+
+That answer does not replace the reply on its own. The question was measured
+contradicting *itself*: page 6 once in three runs, where the reply was right. A
+disagreement therefore buys a second asking, and the total the reply carried is
+replaced only when both answers say the same thing. On page 8 both say 12,40
+against a reply of 3,36, and on page 6 the second answer is the total and the reply
+stands. The cost is one extra call per bill, and a second one only on the pages
+where the two disagree.
+
+Measured over the whole collection, twice, one page at a time: **21 of 21 totals
+right**, where the reply alone was right on 20 and the two other wordings on 18 and
+20. The suite followed: 25 passed and 11 failed, against 24 and 12 before it, with
+no total among the failures. The extra calls added about 15 s to a suite run of 34
+bills.
 
 ### Handwriting on a printed bill
 

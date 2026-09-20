@@ -188,6 +188,14 @@ QVector<BillResult> analyseFile(const QString &path,
             bill.notes.append(
                 QStringLiteral("issue date asked on its own, without a schema"));
 
+        // The total came from a question of its own and disagreed with the reply.
+        // Worth a note rather than a quiet fix: the reply's number was the one
+        // beside a savings note, and a total that changes between runs otherwise
+        // looks like the model having a bad day rather than a rule doing its job.
+        if (client.totalCorrected())
+            bill.notes.append(QStringLiteral("gross total from the SUMME line, the extraction "
+                                             "reply carried a different one"));
+
         if (!bill.ok && bill.error.isEmpty())
             bill.error = QStringLiteral("the model returned no usable fields");
 
