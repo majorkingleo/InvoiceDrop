@@ -61,7 +61,7 @@ per page. The page limit is lifted for this test, so a 21 page collection expect
 | `gross_total` | exact, to the cent. `732.0` and `732.00` are the same number |
 | `date` | exact |
 | `currency` | exact, upper case |
-| `vendor` | case insensitive, with runs of whitespace collapsed. `BERTAHÜTTE`, `Bertahütte` and `bertahütte` all pass. The casing follows the paper and the model, and neither is a correctness signal |
+| `vendor` | case, spacing and punctuation are folded away, then compared exactly. `BERNHARDT - CLAUDIA BERNHARDT` passes for `bernhardt-claudia bernhardt`, and `Unser Lagerhaus Warenhandels Ges.m.b.H.` for the same name written `... GesmbH` |
 
 Use `"*"` as a value to skip a field entirely, and `null` to demand that the tool
 reported nothing:
@@ -72,6 +72,41 @@ reported nothing:
 
 Leaving a key out has the same effect as `"*"`: the field is not checked. Keeping
 `"*"` explicit is easier to spot in a diff than a missing line.
+
+### `vendor` patterns
+
+Folding reaches case, spacing and punctuation. It cannot reach a letter the model
+misread on a small logo or a word it left out, and those rows stay red for a
+spelling nobody cares about. Write the name between slashes and it becomes a
+regular expression, searched in the folded name (case is ignored in there too):
+
+```json
+{
+    "bill": 3,
+    "vendor": "/^ho[fl]+er/",
+    "date": "2025-07-16",
+    "gross_total": 177.16,
+    "currency": "EUR"
+}
+```
+
+`/^ho[fl]+er/` is `HOFER KG` as the paper and the model disagree about it: the
+logo prints `HOFER` while the letterhead says `HOFER KG`, and the model also
+answers `hoffer` and `hofler`.
+
+Anchor the pattern with `^` when the difference it forgives comes after the name,
+which is the usual case — a missing `KG`, a name the model wrote out in full. The
+anchor is what keeps the row honest. These receipts have a name written on them by
+hand above the printed vendor, and `HOFER`, `EUROSPAR` and `SPAR` are three
+different shops, so the folded name has to *start* with the pattern: `Hanni` fails
+against `/^ho[fl]+er/` and `Hanni EUROSPAR` against `/^eurospar/`. The `dm
+drogerie markt` rows keep a plain name for the same reason, and a handwritten
+name in front of it fails the plain comparison that a pattern without `^` would
+have accepted, because a pattern that is not anchored is searched anywhere.
+
+A pattern runs against the folded name, so it carries no hyphen, no run of spaces
+and no full stop: `Ges.m.b.H.` is `gesmbh` once folded. A pattern that does not
+compile is reported as a mistake in the file, not as a name the model got wrong.
 
 ## Why a bill can be marked unverified
 

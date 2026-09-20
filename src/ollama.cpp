@@ -27,6 +27,9 @@ Rules:
   promotional line and not a running balance.
 - Use a dot as the decimal separator and no thousands separator.
 - Give dates as ISO 8601, YYYY-MM-DD.
+- A machine printed bill is read from its printed text. Disregard anything written on it by
+  hand — a name, a note, a tick, a sum — even where it overlaps the printing. Handwriting is
+  never the vendor, a date or an amount. A bill that is handwritten itself is read as written.
 - If you cannot read a value, leave the field out. Never guess and never invent a number.
 - Output the JSON object only, with no surrounding text.
 )";

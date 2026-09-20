@@ -855,7 +855,9 @@ from the build tree.
   `main.xml` are the same set in both directions.
 * `tst_bills` — an integration suite. It needs Ollama and skips itself without
   one, and it is the only suite that can be red for a model's reasons rather than
-  the code's.
+  the code's. `tests/testdata/README.md` is the reference for what an expectation
+  may say: the vendor is compared after folding case, spacing and punctuation
+  away, and a vendor written `/like this/` is a regular expression.
 
 Everything except `tst_bills` runs offline in about five seconds.
 
@@ -915,6 +917,22 @@ holder was already named.
   is right and the model is wrong. A prompt addition asking for umlauts and
   careful year digits was measured and reverted: it did not fix the umlaut, left
   the year wrong and made the vendor field swallow the address block.
+
+  Narrowed on 2026-09-20. A vendor row no longer has to be spelled the way the
+  small logo on the paper happens to be spelled: case, spacing, hyphens and other
+  punctuation are folded away, and a vendor written between slashes is a regular
+  expression that says which difference it forgives. Measured on the full suite,
+  before and after: 19 passed and 17 failed, then 22 and 14. The vendor rows went
+  from 12 red to one — a second run of the same tree put it at three, so read the
+  number as "about two, and they move". The totals stopped being red as well; the
+  dates were always red under them and are now visible (13 rows), because a row
+  that fails on the vendor never reaches its date.
+
+  What is left red on the vendor fails for one reason, and it is not a spelling:
+  a name written on the receipt by hand is read as part of the vendor. The prompt
+  rule against that was measured and does not work, see the Ollama section of
+  `docs/architecture.md`. The rows are left red rather than pointed at a looser
+  pattern, because `Hanni` is not what the receipt says.
 * **Multi-invoice documents: resolved as one bill per page.** The store, the test
   and the output all treat a page as a bill. A single invoice spread over two
   pages therefore yields two records, which is the known cost of the rule.

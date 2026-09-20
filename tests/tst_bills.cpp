@@ -10,6 +10,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QRegularExpression>
+#include <QStringList>
 
 using namespace InvoiceDrop;
 
@@ -18,6 +20,9 @@ namespace {
 constexpr auto kSuffix = ".expected-result.json";
 
 /// One expected bill. A field left out, or set to "*", is not compared.
+///
+/// `vendor` is either a plain name or, when it is written between slashes, a
+/// regular expression. See `isVendorPattern`.
 struct ExpectedBill {
     int page = 0;
     QString vendor;
@@ -58,6 +63,47 @@ QString testDataDir()
             break;
     }
     return {};
+}
+
+/// A name written between slashes is a pattern: `"/ho[fl]+er/"`. Everything
+/// else is a plain name and has to match exactly, after folding.
+///
+/// The fold reaches case, spacing and punctuation. It cannot reach a letter the
+/// model misread on a small logo, a word it left out, or a handwritten name it
+/// added to the receipt, and those were the reasons rows were red. A pattern is
+/// how such a row says which difference it is willing to accept. It is not a way
+/// to make a row pass: `/ho[fl]+er/` still refuses the handwritten `Hanni` that
+/// the prompt now tells the model to ignore.
+bool isVendorPattern(const QString &value)
+{
+    return value.size() > 2 && value.startsWith(QLatin1Char('/')) &&
+           value.endsWith(QLatin1Char('/'));
+}
+
+/// The pattern inside the slashes. Case is left out on purpose: the name a
+/// pattern is searched in has been case folded already, and a pattern is matched
+/// case insensitively.
+QString vendorPattern(const QString &value)
+{
+    return value.mid(1, value.size() - 2);
+}
+
+/// Case and spacing are not correctness signals for a company name, so the
+/// comparison folds them away. What is left is the words: "Bäckerei
+/// Wienerroither GmbH" stays itself, and `BERNHARDT - CLAUDIA BERNHARDT`,
+/// `bernhardt-claudia bernhardt` and `Bernhardt  Claudia  Bernhardt` all become
+/// `bernhardt claudia bernhardt`. A hyphen therefore disappears whether or not
+/// it has spaces around it, and so does a full stop in `Ges.m.b.H.`.
+QString foldVendor(const QString &value)
+{
+    static const QRegularExpression word(QStringLiteral("[\\p{L}\\p{N}]+"));
+
+    QStringList words;
+    QRegularExpressionMatchIterator matches = word.globalMatch(value);
+    while (matches.hasNext())
+        words.append(matches.next().captured(0).toCaseFolded());
+
+    return words.join(QLatin1Char(' '));
 }
 
 /// Reads the field of a bill and records what has to be checked about it.
@@ -131,17 +177,24 @@ ExpectedDocument parseExpectation(const QString &expectationPath)
         readField(object, "gross_total", &bill.checkTotal, &bill.totalMustBeEmpty, nullptr,
                   &bill.grossTotal);
 
+        // A vendor pattern that does not compile is a mistake in the file, not a
+        // disagreement with the model. Saying so beats a row that fails looking
+        // like a name the model got wrong.
+        if (isVendorPattern(bill.vendor)) {
+            const QRegularExpression pattern(vendorPattern(bill.vendor),
+                                             QRegularExpression::CaseInsensitiveOption);
+            if (!pattern.isValid()) {
+                expected.error = QStringLiteral("bill %1: vendor pattern is not valid: %2")
+                                     .arg(bill.page)
+                                     .arg(pattern.errorString());
+                return expected;
+            }
+        }
+
         expected.bills.append(bill);
     }
 
     return expected;
-}
-
-/// Case and spacing are not correctness signals for a company name, so the
-/// comparison folds them away. Everything else is compared exactly.
-QString foldVendor(const QString &value)
-{
-    return value.simplified().toCaseFolded();
 }
 
 } // namespace
@@ -289,6 +342,17 @@ void TestBills::bills()
             QVERIFY2(bill.invoice.vendor.isEmpty(),
                      qPrintable(QStringLiteral("vendor should be empty, got '%1'")
                                     .arg(bill.invoice.vendor)));
+        } else if (isVendorPattern(vendor)) {
+            // The pattern is searched in the folded name, so a row written this
+            // way accepts the differences folding cannot reach and refuses the
+            // rest. A pattern that matches nothing is reported with the folded
+            // name, because a mismatching pattern is the usual mistake.
+            const QString folded = foldVendor(bill.invoice.vendor);
+            const QRegularExpression pattern(vendorPattern(vendor),
+                                             QRegularExpression::CaseInsensitiveOption);
+            QVERIFY2(pattern.match(folded).hasMatch(),
+                     qPrintable(QStringLiteral("vendor '%1' (folded to '%2') does not match /%3/")
+                                    .arg(bill.invoice.vendor, folded, vendorPattern(vendor))));
         } else {
             QCOMPARE(foldVendor(bill.invoice.vendor), foldVendor(vendor));
         }

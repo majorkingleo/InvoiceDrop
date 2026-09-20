@@ -28,7 +28,19 @@ namespace {
 ///    invented, measured as 2025-04-17 for a receipt that prints 14.07.2025, and
 ///    without the bump the store would have gone on serving exactly the run this
 ///    change was made to stop.
-constexpr int kPromptVersion = 1;
+/// 2: the extraction prompt tells the model to disregard handwriting on a
+///    machine printed bill (2026-09-20). A `dm drogerie markt` receipt with a
+///    name written on it in blue ink came back as `Hanover drogerie markt GmbH`,
+///    and two `HOFER` / `EUROSPAR` receipts as `Hanni` and `Hanni Eurospar`.
+///    Stored answers carry that mix of paper and pen, so they are no longer
+///    served.
+/// 3: the same rule, reworded. On that dm receipt the handwritten name lies
+///    across the printed first line, and version 2's wording — "handwriting
+///    added to it" — left the answer as it was. The rule now says to disregard
+///    handwriting even where it overlaps the printing. One change to what is
+///    asked, bumped twice because the first wording had to be measured against
+///    the document that prompted it.
+constexpr int kPromptVersion = 3;
 
 constexpr auto kSchema = R"SQL(
 CREATE TABLE IF NOT EXISTS documents (

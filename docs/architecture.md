@@ -438,6 +438,33 @@ Notes on the transport:
 * `/api/tags` is checked once before the first file, so a missing model produces
   one actionable line instead of the same failure per file.
 
+### Handwriting on a printed bill
+
+The extraction prompt says that a machine printed bill is read from its printed
+text, and that anything written on it by hand — a name, a note, a tick, a sum — is
+disregarded even where it overlaps the printing. It was added on 2026-09-20,
+because a `dm drogerie markt` receipt with a name written on it in blue ink came
+back as `Hanover drogerie markt GmbH`, and `Hanover` is not on the paper: the
+handwritten name lies across the printed first line, which is where `dm drogerie
+markt GmbH` is printed.
+
+**Measured, and the rule does not do it.** The same receipt answers `Hanover
+drogerie markt GmbH` with the rule in the prompt and with the rule taken out, and
+in both of its wordings — the first said handwriting "added to" the bill, the
+second says it is disregarded "even where it overlaps the printing", which was
+the wording tried after the first one changed nothing. The Lebensmittel
+collection behaves the same way: pages 5, 11 and 12 have a name written above the
+logo, and page 12 came back as `Hanni EUROSPAR` with the rule out and with the
+rule in.
+
+So the rule is kept against its own evidence, for one reason: it was asked for,
+and it costs one bullet in a prompt that already carries six others. Nothing
+measured here says it earns that bullet. The two documents that leak are the two
+whose handwritten name touches the printed vendor line, and the leak is the same
+whether the model is told about handwriting or not, so the next thing to try is
+not another wording. Reverting it the way the umlaut wording was reverted is the
+cheaper option if the bullet ever matters.
+
 ### What the model is not asked to do
 
 The date is read out of the text by the CLI when the model omits it. Given the
