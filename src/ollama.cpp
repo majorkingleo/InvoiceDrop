@@ -64,7 +64,9 @@ QString userPrompt(const QString &language)
 /// system message, this wording answered the transaction date on 20 of the 21
 /// pages in one pass, and the one miss was answered right on the next three runs.
 /// The wording is the one the measurement used, unmodified.
-const char *kDateQuestion = "give me the date when this bill was produced in iso date format";
+const char *kDateQuestion = 
+    "give me the date when this bill was produced in iso date format. "
+    "If you find a transaction date, use this one";
 
 /// The prompt for the question that reads the gross total.
 ///
