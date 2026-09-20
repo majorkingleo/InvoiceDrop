@@ -108,7 +108,8 @@ private:
                              const QString &prompt,
                              const QString &question,
                              const QString &text,
-                             const QList<QByteArray> &jpegPages) const;
+                             const QList<QByteArray> &jpegPages,
+                             bool think) const;
 
     QString request(const QByteArray &method,
                     const QString &path,

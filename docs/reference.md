@@ -813,11 +813,12 @@ invoicedrop --verbose rechnung.pdf 2>&1 | grep 'date answer'
 ```
 
 A receipt that prints an offer period — "Vom 01.05.2025 - 07.09.2025 haben wir
-jeden Sonn- und Feiertag geöffnet" — can have the start of that period reported as
-the issue date. Both the system prompt and the date prompt say not to; on the
-collection in `tests/testdata` the model does it on the pages that carry the
-notice anyway. The date is wrong there and there is nothing to distinguish it from
-a correct answer, so check those documents by hand.
+jeden Sonn- und Feiertag geöffnet" — used to have the start of that period
+reported as the issue date. The date question now reads the transaction date on
+20 of the 21 pages of the collection in `tests/testdata`; the question has to
+think, and the one page it gets wrong, and which page that is, moves between
+runs. When a run is wrong, the `date answer` line above shows which dates were on
+the paper, and re-reading the file usually lands on the right one.
 
 **Every page of a long PDF is not read.**
 `--pages` defaults to 4, and a collection of receipts needs a higher value. The

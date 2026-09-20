@@ -45,7 +45,7 @@ QString userPrompt(const QString &language)
         .arg(language);
 }
 
-/// The prompt for the question that reads the issue date.
+/// The question that reads the issue date.
 ///
 /// This is where the issue date comes from. The extraction schema still asks for
 /// one and the reply still fills it in, but it is believed only when this question
@@ -54,30 +54,17 @@ QString userPrompt(const QString &language)
 /// date in the text layer gets there first, so on a photograph this is the
 /// ordinary route rather than a rescue.
 ///
-/// The request carries no schema, which is the point of it. Measured on a
-/// pharmacy receipt: the extraction request with `format` left the date out while
-/// the same image answered `21.07.2025` to a question about it, and narrowing the
-/// schema to the date alone was worse still, returning `21`. So the answer goes
-/// through the same normaliser the text layer uses, which is where a date is a
-/// regular expression rather than a judgement.
-///
-/// The first bullet said "The day is what is wanted" until 2026-09-19, meaning
-/// "ignore the time". On a narrow 82 mm receipt it was read literally: the answer
-/// was `17`, which `normaliseDate` rightly refuses, and the bill came back with no
-/// date at all. Asking for the whole date instead answered `17.07.2025` twice out
-/// of two, and left the date on the wide pharmacy receipt unchanged.
-const char *kDatePrompt = R"(You read the issue date of a business document.
-- The date is often printed next to a time, as in 21.07.2025 10:31:31. Report the whole
-  date and ignore the time.
-- Do not report a date that belongs to something else on the document, such as a card
-  expiry, a delivery date or a prescription date.
-- If the document shows no issue date at all, answer NONE.
-- Answer with nothing but the date, or with NONE.
-)";
-
-/// What the follow-up question asks. One question about one field: the answer is
-/// a date or NONE, and `normaliseDate` is what accepts or rejects it.
-const char *kDateQuestion = "What is the issue date of this document?";
+/// It is deliberately the whole instruction, in a request that carries no system
+/// message and no schema. `think` is on for this one request: the answer has to
+/// choose between several dates on the paper, and without a reasoning trace the
+/// model does not choose. Measured 2026-09-20 on the collection in
+/// `tests/testdata`: with a system prompt, in three wordings, the model answered
+/// the start of an offer period — `Vom 01.05.2025 - 07.09.2025` on a leaflet next
+/// to the receipt — and a two line system prompt was no different. Without any
+/// system message, this wording answered the transaction date on 20 of the 21
+/// pages in one pass, and the one miss was answered right on the next three runs.
+/// The wording is the one the measurement used, unmodified.
+const char *kDateQuestion = "give me the date when this bill was produced in iso date format";
 
 /// The prompt for the question that reads the gross total.
 ///
@@ -226,7 +213,8 @@ QString OllamaClient::askWithoutSchema(const QString &field,
                                        const QString &prompt,
                                        const QString &question,
                                        const QString &text,
-                                       const QList<QByteArray> &jpegPages) const
+                                       const QList<QByteArray> &jpegPages,
+                                       bool think) const
 {
     // Whatever the extraction was handed, this asks about: page images, the text
     // layer, or both. A document that arrived as text has no image to send, and
@@ -238,10 +226,6 @@ QString OllamaClient::askWithoutSchema(const QString &field,
         asked += QStringLiteral("\n\n--- extracted text, may be corrupted ---\n");
         asked += carried;
     }
-
-    QJsonObject system;
-    system.insert(QStringLiteral("role"), QStringLiteral("system"));
-    system.insert(QStringLiteral("content"), prompt);
 
     QJsonObject user;
     user.insert(QStringLiteral("role"), QStringLiteral("user"));
@@ -255,7 +239,12 @@ QString OllamaClient::askWithoutSchema(const QString &field,
     }
 
     QJsonArray messages;
-    messages.append(system);
+    if (!prompt.isEmpty()) {
+        QJsonObject system;
+        system.insert(QStringLiteral("role"), QStringLiteral("system"));
+        system.insert(QStringLiteral("content"), prompt);
+        messages.append(system);
+    }
     messages.append(user);
 
     QJsonObject options;
@@ -265,7 +254,7 @@ QString OllamaClient::askWithoutSchema(const QString &field,
     body.insert(QStringLiteral("model"), m_options.model);
     body.insert(QStringLiteral("messages"), messages);
     body.insert(QStringLiteral("stream"), false);
-    body.insert(QStringLiteral("think"), m_options.think);
+    body.insert(QStringLiteral("think"), think);
     body.insert(QStringLiteral("keep_alive"), m_options.keepAlive);
     // No `format`, which is the whole point of these requests: a schema is what
     // loses the field, and a schema narrowed to the one field was worse still.
@@ -302,9 +291,9 @@ QString OllamaClient::askDate(const QString &text, const QList<QByteArray> &jpeg
 
     Log::step("ai", QStringLiteral("no labelled date in the text: asking for the date on its own, "
                                    "without a schema"));
-    const QString content = askWithoutSchema(QStringLiteral("date"),
-                                             QString::fromUtf8(kDatePrompt),
-                                             QString::fromUtf8(kDateQuestion), text, jpegPages);
+    const QString content = askWithoutSchema(QStringLiteral("date"), QString(),
+                                             QString::fromUtf8(kDateQuestion), text, jpegPages,
+                                             /*think=*/true);
 
     // The answer is prose or a bare date, so it goes through the same normaliser
     // the text layer uses. That is deliberate: it finds a date inside a sentence,
@@ -328,7 +317,8 @@ std::optional<double> OllamaClient::askTotal(const QString &text,
                                    "schema"));
     const QString content = askWithoutSchema(QStringLiteral("total"),
                                              QString::fromUtf8(kTotalPrompt),
-                                             QString::fromUtf8(kTotalQuestion), text, jpegPages);
+                                             QString::fromUtf8(kTotalQuestion), text, jpegPages,
+                                             m_options.think);
 
     const std::optional<double> total = amountFromAnswer(content);
     Log::model("ai", QStringLiteral("total answer: %1 characters, %2")

@@ -57,7 +57,14 @@ namespace {
 /// 8: that answer is believed only when a second asking agrees with it
 ///    (2026-09-20). The question was measured contradicting itself on one receipt,
 ///    so a stored total that came from a single answer may be the wrong one.
-constexpr int kPromptVersion = 8;
+/// 9: the date question was reworded and now thinks (2026-09-20). The old wording
+///    answered the start of an offer period on the receipts that print one, so a
+///    stored date is that wrong answer.
+/// 10: that question now carries no system message (2026-09-20). With any system
+///    prompt, even a two line one, the model answered nonsense, and without one it
+///    answered the transaction date on 20 of 21 pages. A stored date from the
+///    with-system variant is that wrong answer.
+constexpr int kPromptVersion = 10;
 
 constexpr auto kSchema = R"SQL(
 CREATE TABLE IF NOT EXISTS documents (

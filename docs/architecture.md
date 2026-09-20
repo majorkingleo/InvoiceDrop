@@ -539,18 +539,28 @@ the extra question fires only when the answer had no date — the only case that
 pays for it. `BillResult.notes` carries a line saying it happened, so a run that
 took two answers is not mistaken for one that took one.
 
-The answer to that question is a date or `NONE`, and it goes through
-`normaliseDate` like any other text, so a bare `21` cannot become a date.
+The answer to that question goes through `normaliseDate` like any other text, so a
+bare `21` cannot become a date.
 
-**What this question is not good at, measured:** a slip that prints a validity
-period — the Hofer receipt in `tests/testdata` says "Vom 01.05.2025 - 07.09.2025
-haben wir jeden Sonn- und Feiertag geöffnet" above a transaction line of
-`16.07.25 16:10` — gets the period's start back (`01.05.2025`) instead of the date
-of the purchase. Naming that trap in the prompt did not change the answer, so the
-prompt was left as it was rather than accumulating wording that does not earn its
-place. That document is not made worse by this: its extraction already answers
-with a date of its own (`2025-07-01`, also wrong), so the question is never asked
-for it.
+**The offer period, measured and then fixed.** A leaflet printed next to a
+receipt carries "Vom 01.05.2025 - 07.09.2025 haben wir jeden Sonn- und Feiertag
+geöffnet" above a transaction line of `16.07.25 16:10`. The question that used to
+be asked — a system prompt naming the traps, then "What is the issue date of this
+document?" — answered the period's start, `2025-05-01`, in three prompt wordings,
+and a two line system prompt was no different. The question that works carries no
+system message at all, thinks, and is asked as "give me the date when this bill was
+produced in iso date format". Measured 2026-09-20: it read the transaction date on
+20 of the 21 pages of the Lebensmittel collection in one pass, and the one miss
+was answered right on its next three runs. The wording is the one the measurement
+used, unmodified; no system message is added back, because every system prompt
+measured changed the answer for the worse.
+
+What is left is one flaky page, and which page it is moves between runs. The
+question has to deliberate, and occasionally it picks a nearby line — `07.07.2025`
+for a bill of `22.07.2025`. Asking it twice and requiring agreement would cost a
+second reasoning trace per bill for a page that is wrong once in a while, and it is
+not done; the row is left as the known cost of a question the model has to think
+about.
 
 What is *not* covered by measurement: no document in `tests/testdata` lacks a date
 altogether, so "the second question invents one when the document has none" rests

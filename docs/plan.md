@@ -942,11 +942,17 @@ holder was already named.
   `docs/architecture.md`. The rows are left red rather than pointed at a looser
   pattern, because `Hanni` is not what the receipt says.
 
+  The dates followed the totals, the same day and the same way: the date question
+  used to answer the start of an offer period printed beside the receipt. It is
+  now asked with no system message, with thinking on, in one measured wording, and
+  reads the transaction date on 20 of the 21 pages of the collection — one page
+  stays flaky, and which one moves between runs.
+
   A row is also not one failure. The check order is vendor, date, currency, total,
   and the first failure ends the row, so a red vendor row says nothing about its
-  date and a red date row says nothing about its total. The 11 rows red in the last
-  run are eight dates, two handwritten vendors and one vendor that is not on the
-  paper at all.
+  date and a red date row says nothing about its total. The three rows red in the
+  last run are two handwritten vendors, one vendor that is not on the paper at
+  all, and the one flaky date, which a second run usually lands.
 * **Multi-invoice documents: resolved as one bill per page.** The store, the test
   and the output all treat a page as a bill. A single invoice spread over two
   pages therefore yields two records, which is the known cost of the rule.
