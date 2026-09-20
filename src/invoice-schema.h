@@ -12,6 +12,14 @@ namespace InvoiceDrop {
 /// half a JSON object. Only the fields phase 2 reports are listed: line items
 /// multiply the output tokens and the latency, and nothing stores or displays
 /// them yet. They come back with the store in phase 3.
+///
+/// `date` is asked for here and then not believed by default. A schema does not
+/// only lose a field when it cannot read one, it fills one in: measured on
+/// `tests/testdata/2-2.png`, a Sonnenapotheke receipt that prints 14.07.2025
+/// twice, the reply carried `2025-04-17` — a date that is nowhere on the paper —
+/// on three runs out of three at temperature 0. So `OllamaClient` takes the date
+/// from the labelled text or from the question in `askDate`, and this field is
+/// only the last resort.
 inline QJsonObject invoiceSchema()
 {
     const auto string = [](const char *description) {
@@ -33,6 +41,16 @@ inline QJsonObject invoiceSchema()
     properties.insert(QStringLiteral("vendor_address"),
                       string("Postal address of the issuer, one line"));
     properties.insert(QStringLiteral("invoice_number"), string("Invoice or receipt number"));
+    // Asked for, then not believed by default — see the note above. It stays here to
+    // be the last resort, for the document where neither the labelled text nor the
+    // question in `askDate` comes back with a date, because an unverified date still
+    // beats no date and that is where this field came from before the question
+    // existed.
+    //
+    // Dropping the property instead was measured and gained nothing: on page 6 of
+    // the collection in tests/testdata the reply reported the same gross total, 9.58
+    // where the receipt says 46.16, with the property and without it. So the schema
+    // is left as it was and only the date policy changed.
     properties.insert(QStringLiteral("date"), string("Issue date, ISO 8601, YYYY-MM-DD"));
     properties.insert(QStringLiteral("due_date"), string("Payment due date, ISO 8601, YYYY-MM-DD"));
     properties.insert(QStringLiteral("currency"), string("ISO 4217 code such as EUR"));

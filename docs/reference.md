@@ -714,10 +714,17 @@ cannot answer with prose.
 
 Two details that matter in practice:
 
-* **The date is read from the text directly when the model omits it.** Given the
-  same input the model returns the date in some runs and drops it in the next,
-  even at temperature 0. A date is a regular expression rather than a judgement
-  call, so the labelled date is taken from the text instead of asking twice.
+* **The issue date is not taken from the reply when something else can supply it.**
+  A schema does not only lose a field it cannot read, it fills one in. Measured on
+  `tests/testdata/2-2.png`, a pharmacy receipt that prints 14.07.2025 twice: the
+  constrained reply answered `2025-04-17`, a date that is nowhere on the paper, on
+  three runs out of three. So a labelled date in the text layer is taken first, a
+  second request that carries no schema and asks for the date on its own is asked
+  second, and the reply's own date is kept only for the document where both come
+  back empty — that order is the whole of the rule. On the 21 page collection in
+  `tests/testdata` the question read 13 of the 21 issue dates correctly against 7
+  for the reply; the page it gets wrong carries a printed offer period, "Vom
+  01.05.2025 - 07.09.2025", which it reports as the issue date.
 * **A result built from an unreadably small scan is flagged.** Below 400 px on
   the short edge every model tested invents a vendor, a date and a total. Those
   results carry `quality_warning` and the warning is printed on stderr.
@@ -779,6 +786,20 @@ Check what the text layer actually contains:
 ```fish
 invoicedrop --extract-only rechnung.pdf | head -40
 ```
+
+Then what the date question answered, which is where the date comes from when the
+text layer has no labelled one:
+
+```fish
+invoicedrop --verbose rechnung.pdf 2>&1 | grep 'date answer'
+```
+
+A receipt that prints an offer period — "Vom 01.05.2025 - 07.09.2025 haben wir
+jeden Sonn- und Feiertag geöffnet" — can have the start of that period reported as
+the issue date. Both the system prompt and the date prompt say not to; on the
+collection in `tests/testdata` the model does it on the pages that carry the
+notice anyway. The date is wrong there and there is nothing to distinguish it from
+a correct answer, so check those documents by hand.
 
 **Every page of a long PDF is not read.**
 `--pages` defaults to 4, and a collection of receipts needs a higher value. The

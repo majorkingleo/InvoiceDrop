@@ -61,12 +61,14 @@ public:
                  QString *error = nullptr);
 
     /// Milliseconds spent in the last successful `analyse`, including the extra
-    /// question when the issue date had to be asked for on its own.
+    /// request when the issue date had to be read from the page.
     qint64 lastInferenceMs() const { return m_lastInferenceMs; }
 
-    /// True when the last `analyse` found no date and asked about it separately.
-    /// Reported as a note: it is the trace of a run that took two answers.
-    bool dateWasAskedAgain() const { return m_dateAsked; }
+    /// True when the issue date of the last `analyse` came from the separate
+    /// question rather than from a labelled date in the text layer. Reported as a
+    /// note: on a photograph this is now the ordinary route, and the note is there
+    /// so a bill that took two requests is not read as one that took a single one.
+    bool dateAskedSeparately() const { return m_dateAsked; }
 
 private:
     /// The request body as an object, so the same value can be serialised for the
@@ -78,7 +80,12 @@ private:
 
     /// Asks for the issue date on its own, without a JSON schema, and returns it
     /// normalised. Empty when the answer held no complete date.
-    QString askDate(const QList<QByteArray> &jpegPages) const;
+    ///
+    /// The question carries whatever the extraction carried — the page images, the
+    /// text layer, or both — because a document that arrived as text has no image
+    /// to send. `normaliseDate` is what decides: it is the reason a reply like `17`,
+    /// which names a day and nothing else, cannot come out of here as a date.
+    QString askDate(const QString &text, const QList<QByteArray> &jpegPages) const;
 
     QString request(const QByteArray &method,
                     const QString &path,

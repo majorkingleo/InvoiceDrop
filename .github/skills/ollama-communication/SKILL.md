@@ -79,7 +79,11 @@ request lands on `//api/chat`.
 - **`think: false`.** Measured on one receipt: **10.2 s with a reasoning trace,
   1.0 s without, the same answer byte for byte.** Extraction is not a task that
   benefits from deliberation. Check `.capabilities` for `thinking` before
-  assuming a model has the switch at all.
+  assuming a model has the switch at all. Treat that "same answer" as a
+  measurement of one call and not a promise, though: on a second receipt the two
+  runs differed, because the reasoning trace made the reply leave the issue date
+  out — and the absence of the field, not the trace, was what produced the right
+  date downstream. A difference in a field you do not use is still a difference.
 - **`keep_alive: "30m"`** keeps the weights resident, so the second document in a
   run is not a cold start. Without it, every call pays the load again.
 - **`temperature: 0`** for stability across runs. Any cache keyed on the answer
@@ -127,7 +131,7 @@ Everything below was observed, not feared:
 
 ## What not to ask the model for
 
-Two of these were learned the expensive way and are worth more than the API
+Most of these were learned the expensive way and are worth more than the API
 details:
 
 1. **A date is a regular expression, not a judgement call.** Given the same text
@@ -135,24 +139,47 @@ details:
    it in others. Read the labelled date out of the text yourself and use it when
    the model stays silent. Only accept a date on a line that carries a date
    label — the earliest date on a document is often a service period.
-2. **A JSON schema can cost you a field.** The same image that answers
-   `21.07.2025` to "what is the issue date?" left the date out of the
-   11-property `format` reply — and a schema narrowed to the date alone answered
-   `21`. So when a field matters and keeps coming back missing, ask for it in a
-   separate request **without** `format`, and normalise the prose answer, rather
-   than widening or tightening the schema. Do not force it with `required`
-   either: adding the date to the required list changed the same document's
-   second bill to a wrong date *and* a wrong total. Keep the extra question for
-   the case that needs it, and say in your own logs that it was asked, so a run
-   that took two answers is not mistaken for one that took one.
-3. **Below a certain raster resolution every model invents.** Measured: a scan
+2. **A JSON schema can cost you a field, and it can also fill one in.** The same
+   image that answers `21.07.2025` to "what is the issue date?" left the date out
+   of the 11-property `format` reply — and a schema narrowed to the date alone
+   answered `21`. Measured later on a receipt that prints 14.07.2025 twice: with
+   `think: false` the schema-constrained reply carried `2025-04-17`, a date that
+   is nowhere on the paper, on three runs out of three. So when a field matters,
+   ask for it in a separate request **without** `format`, and normalise the prose
+   answer, rather than widening or tightening the schema. Do not force it with
+   `required` either: adding the date to the required list changed the same
+   document's second bill to a wrong date *and* a wrong total. Keep the extra
+   question for the case that needs it, and say in your own logs that it was
+   asked, so a run that took two answers is not mistaken for one that took one.
+3. **A fallback keyed on "the field is empty" is not a fallback, it is a coin
+   flip.** That wrong date was never missing, so the code that asked about the
+   date "when the model stayed silent" never ran. If an answer can be wrong rather
+   than absent, an empty check is not a guard: decide which source you believe
+   *first* and use the model's own value only when the better source has nothing.
+   The bug stayed invisible while `think: true`, because the reasoning trace made
+   the schema drop the field, which let the fallback run. Turning thinking off
+   removed the accident that had been doing the work.
+4. **Neither source is reliable alone, so measure per document.** Over a 21 page
+   collection, the separate date question read 13 issue dates correctly against 7
+   for the schema-constrained reply — and on the page the question got wrong, the
+   reply was right: that page prints an offer period ("Vom 01.05.2025 -
+   07.09.2025") and the question reported the start of it. Prefer the source that
+   wins on your documents, and leave the loser's value in a log line so a wrong
+   value has a trace.
+5. **The wording of a one-field question is load-bearing.** A date prompt ending
+   "The day is what is wanted", meaning "ignore the time", was read literally on a
+   narrow 82 mm receipt: the answer was `17`, which no date parser should accept.
+   "Report the whole date and ignore the time" answered `17.07.2025`, twice out of
+   two. Ask for the shape you will parse, and check that what comes back is
+   complete before trusting it.
+6. **Below a certain raster resolution every model invents.** Measured: a scan
    174 px wide (~3.6 px per character) produced a confident vendor, a date and a
    total from two different models, and both were wrong; one invented a currency
    that is not on the paper. Below 400 px on the short edge with no text layer,
    mark the result as untrustworthy instead of presenting it as fact.
-4. **Do not ask for line items you do not display.** They multiply output tokens
+7. **Do not ask for line items you do not display.** They multiply output tokens
    and latency, and nothing reads them.
-5. **Do not ask a model to count, add up, or format money.** Do that in code.
+8. **Do not ask a model to count, add up, or format money.** Do that in code.
 
 ## Failure handling that stays actionable
 

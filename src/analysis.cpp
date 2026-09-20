@@ -180,11 +180,13 @@ QVector<BillResult> analyseFile(const QString &path,
         bill.ok = client.analyse(text, images, &bill.invoice, &bill.error);
         bill.inferMs = client.lastInferenceMs();
 
-        // A second answer was needed for the date. Worth saying: the bill took two
-        // requests, and the note is the only trace of that in the output.
-        if (client.dateWasAskedAgain())
+        // The issue date came from the page, in a request of its own. Worth
+        // saying: the bill took two requests and the note is the only trace of
+        // that in the output. On a photograph that is the ordinary route, which is
+        // why it is a plain note and not a warning.
+        if (client.dateAskedSeparately())
             bill.notes.append(
-                QStringLiteral("issue date asked on its own, the extraction had left it out"));
+                QStringLiteral("issue date asked on its own, without a schema"));
 
         if (!bill.ok && bill.error.isEmpty())
             bill.error = QStringLiteral("the model returned no usable fields");

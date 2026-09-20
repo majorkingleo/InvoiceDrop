@@ -16,6 +16,20 @@
 namespace InvoiceDrop {
 namespace {
 
+/// Bumped whenever a change to what is asked of the model makes a stored answer
+/// wrong rather than merely old.
+///
+/// The fingerprint hashes the settings that change an answer, and the prompt is
+/// one of them — the same file, the same model and the same raster can still be
+/// read differently because the request changed.
+///
+/// 1: the issue date stopped being taken from the extraction reply (2026-09-19).
+///    An answer stored before that carries whatever date the constrained reply
+///    invented, measured as 2025-04-17 for a receipt that prints 14.07.2025, and
+///    without the bump the store would have gone on serving exactly the run this
+///    change was made to stop.
+constexpr int kPromptVersion = 1;
+
 constexpr auto kSchema = R"SQL(
 CREATE TABLE IF NOT EXISTS documents (
     sha256         TEXT PRIMARY KEY,
@@ -153,7 +167,7 @@ QString Store::fingerprint(const Extract::ReadOptions &options, const QString &m
 {
     const QString key = QStringLiteral(
                             "model=%1;pages=%2;dpi=%3;longEdge=%4;minShortEdge=%5;"
-                            "threshold=%6;ocr=%7;ocrLang=%8")
+                            "threshold=%6;ocr=%7;ocrLang=%8;prompt=%9")
                             .arg(model)
                             .arg(options.maxPages)
                             .arg(options.dpi)
@@ -161,7 +175,8 @@ QString Store::fingerprint(const Extract::ReadOptions &options, const QString &m
                             .arg(options.minShortEdge)
                             .arg(options.textLayerThreshold)
                             .arg(options.ocr.enabled ? 1 : 0)
-                            .arg(options.ocr.languages);
+                            .arg(options.ocr.languages)
+                            .arg(kPromptVersion);
 
     return QString::fromLatin1(
         QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex().left(16));

@@ -633,14 +633,15 @@ cannot answer with prose.
 
 Two details that matter in practice:
 
-* **The date is read from the text directly when the model omits it.** Given the
-  same input the model returns the date in some runs and drops it in the next,
-  even at temperature 0. A date is a regular expression rather than a judgement
-  call, so the labelled date is taken from the text instead of asking twice. When
-  there is no text at all — a photograph, or a scan with no text layer — the one
-  field the JSON schema tends to lose is asked for on its own, in a request that
-  carries no schema, and the bill says so in `notes`:
-  `issue date asked on its own, the extraction had left it out`.
+* **The issue date is not taken from the JSON schema's reply when something else
+  can supply it.** A schema does not only lose a field it cannot read, it fills
+  one in: on a pharmacy receipt that prints 14.07.2025 twice, the constrained
+  reply answered `2025-04-17`, a date that is nowhere on the paper. So the date
+  comes from a labelled date in the text layer first, and from a second request
+  that carries no schema and asks for the date on its own second. The reply's own
+  date is kept for the document where both of those come back empty, which is the
+  only case where it is used at all. A bill that needed the second request says so
+  in `notes`: `issue date asked on its own, without a schema`.
 * **A result built from an unreadably small scan is flagged.** Below 400 px on
   the short edge every model tested invents a vendor, a date and a total. Those
   results carry `quality_warning` and the warning is printed on stderr.

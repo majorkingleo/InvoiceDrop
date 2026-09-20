@@ -1,5 +1,6 @@
 #include <QtTest>
 
+#include "invoice-schema.h"
 #include "invoice.h"
 
 using namespace InvoiceDrop;
@@ -30,6 +31,10 @@ private slots:
     void readsFencedJson();
     void readsJsonSurroundedByProse();
     void rejectsNonJson();
+
+    // ----------------------------------------------------------- schema
+    void extractionSchemaKeepsTheDateProperty();
+    void extractionSchemaRequiresWhatPlausibleChecks();
 
     // ------------------------------------------------------ placeholders
     void treatsApologiesAsMissing_data();
@@ -197,6 +202,58 @@ void TestInvoice::rejectsNonJson()
                                                    &error);
     QVERIFY(!invoice.plausible());
     QVERIFY(!error.isEmpty());
+}
+
+// ------------------------------------------------------------------- schema
+
+void TestInvoice::extractionSchemaKeepsTheDateProperty()
+{
+    // The date is the one field of this schema nobody trusts first: a constrained
+    // reply fills it in rather than leaving it empty, so ollama.cpp takes the date
+    // from a labelled date in the text or from a second, schema-free question, and
+    // keeps this field for the document where both of those come back empty.
+    //
+    // This test holds that decision in place, and it is a decision rather than an
+    // oversight — dropping the property looks like the obvious cleanup. It was
+    // measured on page 6 of the collection in tests/testdata and gained nothing:
+    // the reply reported the same gross total, 9.58 where the receipt says 46.16,
+    // with the property and without it.
+    //
+    // Which source reads a date better is not something this test can judge; that
+    // is what the `bills` suite and its expectation files are for.
+    const QJsonObject properties =
+        invoiceSchema().value(QStringLiteral("properties")).toObject();
+
+    QVERIFY2(properties.contains(QStringLiteral("date")),
+             "the date property stays in the schema as the last resort for the date, and only "
+             "the order the sources are believed in changed");
+
+    // Nothing was traded away for it. These are the fields that were there before.
+    for (const char *name : {"vendor", "vendor_address", "invoice_number", "due_date",
+                             "currency", "net_total", "tax_total", "gross_total", "iban",
+                             "confidence"}) {
+        QVERIFY2(properties.contains(QString::fromLatin1(name)), name);
+    }
+}
+
+void TestInvoice::extractionSchemaRequiresWhatPlausibleChecks()
+{
+    // A reply is accepted only when `plausible()` holds, and every field it checks
+    // has to be required of the model: a field that is merely listed can come back
+    // missing, which costs the one retry. The other direction matters too — a name
+    // in `required` that is not in `properties` is a broken schema.
+    const QJsonObject schema = invoiceSchema();
+    const QJsonObject properties = schema.value(QStringLiteral("properties")).toObject();
+    const QJsonArray required = schema.value(QStringLiteral("required")).toArray();
+
+    QVERIFY(required.contains(QStringLiteral("vendor")));
+    QVERIFY(required.contains(QStringLiteral("gross_total")));
+
+    for (const QJsonValue &entry : required) {
+        const QString name = entry.toString();
+        QVERIFY2(properties.contains(name),
+                 qPrintable(QStringLiteral("required field %1 is not in properties").arg(name)));
+    }
 }
 
 // ------------------------------------------------------------- placeholders

@@ -39,17 +39,30 @@ QString userPrompt(const QString &language)
         .arg(language);
 }
 
-/// The prompt for the follow-up question about the issue date.
+/// The prompt for the question that reads the issue date.
 ///
-/// It exists because a JSON schema costs this one field: measured on a pharmacy
-/// receipt, the extraction request with `format` left the date out while the same
-/// image answered `21.07.2025` to a question about it. Constraining the schema to
-/// the date alone was worse still, returning `21`. So the second request carries
-/// no schema at all and its answer goes through the same normaliser the text layer
-/// uses, which is where a date is a regular expression rather than a judgement.
+/// This is where the issue date comes from. The extraction schema still asks for
+/// one and the reply still fills it in, but it is believed only when this question
+/// finds nothing, so that a reply that invents a date cannot become the answer by
+/// simply not being empty. `invoice-schema.h` has the measurement. Only a labelled
+/// date in the text layer gets there first, so on a photograph this is the
+/// ordinary route rather than a rescue.
+///
+/// The request carries no schema, which is the point of it. Measured on a
+/// pharmacy receipt: the extraction request with `format` left the date out while
+/// the same image answered `21.07.2025` to a question about it, and narrowing the
+/// schema to the date alone was worse still, returning `21`. So the answer goes
+/// through the same normaliser the text layer uses, which is where a date is a
+/// regular expression rather than a judgement.
+///
+/// The first bullet said "The day is what is wanted" until 2026-09-19, meaning
+/// "ignore the time". On a narrow 82 mm receipt it was read literally: the answer
+/// was `17`, which `normaliseDate` rightly refuses, and the bill came back with no
+/// date at all. Asking for the whole date instead answered `17.07.2025` twice out
+/// of two, and left the date on the wide pharmacy receipt unchanged.
 const char *kDatePrompt = R"(You read the issue date of a business document.
-- The date is often printed next to the time, as in 21.07.2025 10:31:31. The day is
-  what is wanted.
+- The date is often printed next to a time, as in 21.07.2025 10:31:31. Report the whole
+  date and ignore the time.
 - Do not report a date that belongs to something else on the document, such as a card
   expiry, a delivery date or a prescription date.
 - If the document shows no issue date at all, answer NONE.
@@ -140,14 +153,21 @@ OllamaClient::OllamaClient(OllamaOptions options) : m_options(std::move(options)
         m_options.url.chop(1);
 }
 
-QString OllamaClient::askDate(const QList<QByteArray> &jpegPages) const
+QString OllamaClient::askDate(const QString &text, const QList<QByteArray> &jpegPages) const
 {
-    if (jpegPages.isEmpty())
+    // Whatever the extraction was handed, this asks about: page images, the text
+    // layer, or both. A document that arrived as text has no image to send, and
+    // skipping the question for it would leave the date to the extraction reply,
+    // which is the source this question exists to check.
+    const QString carried = text.trimmed();
+    if (carried.isEmpty() && jpegPages.isEmpty())
         return {};
 
-    QJsonArray images;
-    for (const QByteArray &page : jpegPages)
-        images.append(QString::fromLatin1(page.toBase64()));
+    QString question = QString::fromUtf8(kDateQuestion);
+    if (!carried.isEmpty()) {
+        question += QStringLiteral("\n\n--- extracted text, may be corrupted ---\n");
+        question += carried;
+    }
 
     QJsonObject system;
     system.insert(QStringLiteral("role"), QStringLiteral("system"));
@@ -155,8 +175,14 @@ QString OllamaClient::askDate(const QList<QByteArray> &jpegPages) const
 
     QJsonObject user;
     user.insert(QStringLiteral("role"), QStringLiteral("user"));
-    user.insert(QStringLiteral("content"), QString::fromUtf8(kDateQuestion));
-    user.insert(QStringLiteral("images"), images);
+    user.insert(QStringLiteral("content"), question);
+
+    if (!jpegPages.isEmpty()) {
+        QJsonArray images;
+        for (const QByteArray &page : jpegPages)
+            images.append(QString::fromLatin1(page.toBase64()));
+        user.insert(QStringLiteral("images"), images);
+    }
 
     QJsonArray messages;
     messages.append(system);
@@ -175,11 +201,13 @@ QString OllamaClient::askDate(const QList<QByteArray> &jpegPages) const
     // loses the date, and a schema narrowed to the date alone answered `21`.
     body.insert(QStringLiteral("options"), options);
 
-    Log::step("ai", QStringLiteral("no date in the answer and no text to read one from: "
-                                   "asking for the date alone, without a schema"));
-    Log::block("ai", QStringLiteral("date question, %1 characters")
-                         .arg(QString::fromUtf8(kDateQuestion).size()),
+    Log::step("ai", QStringLiteral("no labelled date in the text: asking for the date on its own, "
+                                   "without a schema"));
+    Log::block("ai", QStringLiteral("date prompt, %1 characters")
+                         .arg(QString::fromUtf8(kDatePrompt).size()),
                QString::fromUtf8(kDatePrompt));
+    Log::block("ai", QStringLiteral("date question, %1 characters").arg(question.size()),
+               question);
 
     QString transportError;
     const QString reply = request("POST", QStringLiteral("/api/chat"),
@@ -427,38 +455,61 @@ bool OllamaClient::analyse(const QString &text,
         Invoice parsed = Invoice::fromModelReply(content, &parseError);
 
         if (parsed.plausible()) {
-            // The model is not asked twice for something a regular expression can
-            // read off the text, and it does drop the date on some runs.
-            if (parsed.date.isEmpty()) {
-                const QString fallback = findLabelledDate(text);
-                if (!fallback.isEmpty()) {
-                    parsed.date = fallback;
-                    Log::step("ai", QStringLiteral("no date in the answer, took %1 off the text")
-                                           .arg(fallback));
+            // The issue date is decided here, and not by the reply. The reply does
+            // carry one — the schema still asks for it, and that is left alone —
+            // but it is the source that fills this field in when it cannot read
+            // it, so it is kept only as the last resort.
+            const QString fromReply = parsed.date;
+            parsed.date.clear();
+
+            // First source: a labelled date in the text layer. It is a regular
+            // expression rather than a judgement, and it only accepts a date on a
+            // line that carries a date label, so the earliest date on the paper,
+            // often a service period, is not picked up by accident.
+            if (!text.trimmed().isEmpty()) {
+                parsed.date = findLabelledDate(text);
+                if (!parsed.date.isEmpty()) {
+                    Log::step("ai", QStringLiteral("date %1 taken off the labelled text")
+                                           .arg(parsed.date));
                 }
             }
 
-            // Still nothing, and no text to read it out of: ask about the date on
-            // its own. This is the field a JSON schema costs — on a photographed
-            // pharmacy receipt the extraction reply leaves it out, while the same
-            // image answers `21.07.2025` to a question about it.
+            // Second source: the date question, in a request that carries no schema.
+            // This is the ordinary route for a photograph, and the extra half second
+            // it costs is what buys a date that was measured right on 13 of the 21
+            // pages of the collection in tests/testdata, against 7 for the reply.
             //
             // A second request rather than a stronger prompt, because the two
-            // cheaper ways to force it were tried and both cost more than they
-            // gave: adding the date to the schema's `required` list turned the
-            // second bill of that same document into a wrong date *and* a wrong
-            // total, and wording the system prompt to insist on a date did the
-            // same. The extraction request is left exactly as it was.
-            if (parsed.date.isEmpty() && !jpegPages.isEmpty()) {
+            // cheaper ways to force the date out of the extraction were tried and
+            // both cost more than they gave: adding the date to the schema's
+            // `required` list turned the second bill of that same document into a
+            // wrong date *and* a wrong total, and wording the system prompt to
+            // insist on a date did the same.
+            if (parsed.date.isEmpty() && (!text.trimmed().isEmpty() || !jpegPages.isEmpty())) {
                 QElapsedTimer dateTimer;
                 dateTimer.start();
-                parsed.date = askDate(jpegPages);
+                parsed.date = askDate(text, jpegPages);
                 m_lastInferenceMs += dateTimer.elapsed();
-                m_dateAsked = true;
 
-                if (parsed.date.isEmpty()) {
-                    Log::warn("ai", QStringLiteral("asked for the date on its own, still none: "
-                                                   "reporting the bill without one"));
+                if (!parsed.date.isEmpty()) {
+                    m_dateAsked = true;
+                } else {
+                    // The question answered nothing usable: no date, a fragment like
+                    // `17`, or a failed request. The reply's own date is then the
+                    // only evidence left, and it is taken even though the reply is
+                    // the source that invents dates — an unverified date is still
+                    // better than none, and this is exactly where the date came from
+                    // before the question existed. It is worth saying out loud,
+                    // because a wrong date here has no other trace in the output.
+                    parsed.date = fromReply;
+                    Log::warn("ai", fromReply.isEmpty()
+                                       ? QStringLiteral("the date question found nothing and the "
+                                                        "extraction carried no date either: "
+                                                        "reporting the bill without one")
+                                       : QStringLiteral("the date question found nothing, so the "
+                                                        "date the extraction carried (%1) is used "
+                                                        "unverified")
+                                             .arg(fromReply));
                 }
             }
 

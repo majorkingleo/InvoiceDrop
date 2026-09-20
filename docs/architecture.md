@@ -263,9 +263,18 @@ cascades to its bills.
 The same file read with another model, another page limit or another dpi is a
 different question. `Store::fingerprint()` hashes the settings that change the
 answer — model, page limit, dpi, long edge, short edge floor, text layer
-threshold, OCR switch and OCR languages — and a cache hit requires the hash *and*
-the fingerprint to match. Without it, switching `--model` would serve the previous
-model's answers from disk and look like a regression in the new one.
+threshold, OCR switch, OCR languages and the prompt version — and a cache hit
+requires the hash *and* the fingerprint to match. Without it, switching `--model`
+would serve the previous model's answers from disk and look like a regression in
+the new one.
+
+The prompt is part of that list because it is a setting like the others. The same
+file, model and raster still answer differently when the request changes, so
+`kPromptVersion` in `store.cpp` is bumped whenever a change to what is asked of
+the model makes a stored answer wrong rather than merely old. It was first needed
+when the issue date stopped being taken from the schema's reply: before that, a
+stored answer could hold a date the model had invented, and without the bump the
+store would have gone on serving it.
 
 Lookup happens before the document is opened, because hashing a file is
 milliseconds while rasterising and inferring are seconds. A document row without
