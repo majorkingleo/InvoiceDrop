@@ -1,0 +1,11 @@
+{
+    "bills": [
+        {
+            "bill": 1,
+            "vendor": "EUROSPAR",
+            "date": "2026-09-19",
+            "gross_total": 3.98,
+            "currency": "EUR"
+        }
+    ]
+}

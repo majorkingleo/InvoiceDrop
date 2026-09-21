@@ -1,0 +1,11 @@
+{
+    "bills": [
+        {
+            "bill": 1,
+            "vendor": "BILLA",
+            "date": "2026-09-16",
+            "gross_total": 2.46,
+            "currency": "EUR"
+        }
+    ]
+}

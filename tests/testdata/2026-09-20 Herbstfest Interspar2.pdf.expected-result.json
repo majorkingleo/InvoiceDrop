@@ -1,0 +1,11 @@
+{
+    "bills": [
+        {
+            "bill": 1,
+            "vendor": "INTERSPAR",
+            "date": "2026-09-18",
+            "gross_total": -35.01,
+            "currency": "EUR"
+        }
+    ]
+}
