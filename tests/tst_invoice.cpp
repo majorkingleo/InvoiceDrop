@@ -61,6 +61,14 @@ void TestInvoice::parsesAmount_data()
     QTest::newRow("with euro sign") << QStringLiteral("€ 1.190,00") << 1190.00;
     QTest::newRow("with currency code") << QStringLiteral("EUR 18,48") << 18.48;
     QTest::newRow("trailing minus is not a sign") << QStringLiteral("18,48-") << 18.48;
+    // A refund receipt prints its total as `SUMME: -35,01`, and the minus is the
+    // whole difference between income and an expense. The sign is read where a
+    // number starts, including after the words the model likes to put in front of
+    // one, which is what `amountFromAnswer` hands in.
+    QTest::newRow("leading minus") << QStringLiteral("-35,01") << -35.01;
+    QTest::newRow("leading minus after a word") << QStringLiteral("SUMME -35,01") << -35.01;
+    QTest::newRow("leading minus and thousands")
+        << QStringLiteral("-1.190,00") << -1190.00;
     QTest::newRow("millions") << QStringLiteral("1.190.000,55") << 1190000.55;
     QTest::newRow("plain integer") << QStringLiteral("42") << 42.0;
     QTest::newRow("zero") << QStringLiteral("0,00") << 0.0;

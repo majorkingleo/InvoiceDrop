@@ -28,6 +28,8 @@ Rules:
   SUMME, Gesamt, Total or Zu zahlen, and the payment line below it carries the same amount.
   A savings note — "Ihre Ersparnis", "Sie sparen", "you saved" — is printed between those
   two lines with a smaller amount, and it is never the total.
+- A total amount can also be negative, for a refund or a return. Read the sign printed on the paper, and do not
+  invent one.
 - Use a dot as the decimal separator and no thousands separator.
 - Give dates as ISO 8601, YYYY-MM-DD.
 - A machine printed bill is read from its printed text. Disregard anything written on it by
@@ -97,8 +99,34 @@ const char *kTotalPrompt = R"(You read the total printed on a business document.
 /// field, which is what makes it answerable. The answer is an amount or NONE, and
 /// `amountFromAnswer` is what accepts or rejects it. NONE means the reply's own
 /// total stands, so a document without such a line is not made worse.
-const char *kTotalQuestion = "Which amount is printed on the line labelled \"SUMME\"? Answer "
-                             "with the amount and nothing else.";
+///
+/// It asks about the sign in as many words (2026-09-21), because that is what the
+/// model needs to read the sign at all. The receipt that prompted it,
+/// `tests/testdata/2026-09-20 Herbstfest Interspar2.pdf`, is a refund: it prints
+/// `SUMME: -35,01` with `RÜCKGELD 35,01` — the change paid out — on the next line.
+/// The wording this replaces, `Which amount is printed on the line labelled
+/// "SUMME"? Answer with the amount and nothing else.`, answered `35,01` on three
+/// runs out of three: the other line, and an amount that looks entirely innocent.
+/// That is the worst shape a wrong answer can have here, because it agrees with
+/// the extraction reply, so no second asking is bought and the wrong total is
+/// confirmed by two sources. Asking whether the line is positive or negative
+/// answered `-35,01` on three runs out of three.
+///
+/// Compared against the replaced wording on all 40 pages of `tests/testdata`, one
+/// run each, it changed three answers: the refund above, `GuSp_SoLa2025_Abzeichen_
+/// plus_Versand_Lux-1` page 1 (`NONE` -> `134,60`, the total actually printed) and
+/// `GuSp_SoLa2025_Lebensmittel_Rechnungen` page 21 (`5,70` -> `55,30`, the
+/// expectation). The other 37 were byte-identical. Three runs each on those three,
+/// and on Lebensmittel pages 6 and 8, held the new answers.
+///
+/// A sign bullet in the system prompt above ("a line can be negative ... keep it")
+/// was measured at the same time and thrown away: `sign-first` with and without it
+/// gave byte-identical answers on the refund and on two ordinary receipts, three
+/// runs each. A rule that changes nothing is a rule that only lengthens the
+/// prompt. `x/totalprobe.py` is the probe, kept for the next wording.
+const char *kTotalQuestion = "Read the line labelled \"SUMME\" on this document. Is the amount "
+                             "printed on it positive or negative? Answer with the amount, "
+                             "including its sign, and nothing else.";
 
 /// Fits a duration into the sentence the user reads.
 QString seconds(qint64 milliseconds)
@@ -169,9 +197,20 @@ void logRequest(const OllamaOptions &options,
 /// `SUMME 12,40, Ersparnis 3,36` — would be glued into `12,403,36` and read as a
 /// third one. Two numbers in the answer therefore mean "not an answer", and the
 /// total the reply carried stands instead.
+///
+/// The minus is part of the number. A receipt that pays money out prints its
+/// `SUMME` line as `-35,01`, and a sign thrown away here is not recoverable
+/// later: the answer becomes one amount, it is the amount the question was asked
+/// for, and it therefore walks straight past the reply. Measured 2026-09-21 on
+/// `tests/testdata/2026-09-20 Herbstfest Interspar2.pdf`: the pattern without the
+/// `-?` read a `-35,01` the model had answered as `35.01` and turned it into a
+/// correction of the reply, which is how a refund became income.
 std::optional<double> amountFromAnswer(const QString &answer)
 {
-    static const QRegularExpression number(QStringLiteral("[0-9][0-9.,']*"));
+    // The sign is only accepted where a number starts, so the hyphen of a word
+    // like `-35,01` is kept and the one in `NONE - 35,01` is not: `parseAmount`
+    // drops a trailing minus on its own, which is what the printed text does too.
+    static const QRegularExpression number(QStringLiteral("-?[0-9][0-9.,']*"));
 
     QStringList found;
     QRegularExpressionMatchIterator matches = number.globalMatch(answer);

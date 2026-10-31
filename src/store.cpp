@@ -64,7 +64,13 @@ namespace {
 ///    prompt, even a two line one, the model answered nonsense, and without one it
 ///    answered the transaction date on 20 of 21 pages. A stored date from the
 ///    with-system variant is that wrong answer.
-constexpr int kPromptVersion = 10;
+/// 11: the total question asks whether the line is positive or negative
+///    (2026-09-21). On the refund receipt `2026-09-20 Herbstfest Interspar2.pdf`
+///    the old wording answered the `RÜCKGELD` line, `35,01` where the paper prints
+///    `SUMME: -35,01`, so a stored total for such a receipt is the amount paid out
+///    with the sign of the purchase. It is also the answer that hides itself: the
+///    reply made the same mistake, so the two agreed and no second asking ran.
+constexpr int kPromptVersion = 11;
 
 constexpr auto kSchema = R"SQL(
 CREATE TABLE IF NOT EXISTS documents (

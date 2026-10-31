@@ -2,7 +2,7 @@
     "bills": [
         {
             "bill": 1,
-            "vendor": "INTERSPAR",
+            "vendor": "INTERSPAR hypermarkt",
             "date": "2026-09-18",
             "gross_total": -35.01,
             "currency": "EUR"

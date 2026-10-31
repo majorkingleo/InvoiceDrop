@@ -500,6 +500,65 @@ right**, where the reply alone was right on 20 and the two other wordings on 18 
 no total among the failures. The extra calls added about 15 s to a suite run of 34
 bills.
 
+### The sign of the total, and a refund
+
+Measured 2026-09-21. `2026-09-20 Herbstfest Interspar2.pdf` in `tests/testdata` is a
+refund: the bottle deposits handed in came to more than the shopping, so the paper
+prints its total negative and the change below it positive.
+
+```
+SUMME:                                                -35,01
+==============================================================
+RÜCKGELD                                              35,01
+```
+
+`gross_total: -35.01` is the expectation, and both sources answered `35,01`. The
+extraction reply did, although its system prompt has said since 2026-09-20 that a
+total "can also be negative, for a refund or a return ... Read the sign printed on
+the paper". The total question did too, and the reason is visible in the two lines
+above: asked for the amount on the line labelled `SUMME`, the model answered the
+`RÜCKGELD` line, which carries the same digits, the sign of a purchase, and no way
+to look wrong.
+
+That second agreement is what made the row red instead of merely suspect. A total
+that two sources agree on is not asked about again, so the correction path never
+ran: the wrong number was confirmed by the same route that exists to catch a wrong
+number. It is the failure mode the second asking cannot see.
+
+Two things were wrong, and only the first is visible in the answers:
+
+* `amountFromAnswer` could not have kept a sign even if the answer had carried one.
+  The pattern it read the answer with was `[0-9][0-9.,']*`, so a `-35,01` from the
+  model came back as `35,01` — the sign discarded in the one place that cannot
+  report the loss, since what comes out still parses as an amount. It is `-?[0-9]
+  [0-9.,']*` now, and `parseAmount` already read the leading minus.
+* The question did not ask about the sign, so the model did not read it. Asking in
+  as many words — "Is the amount printed on it positive or negative? Answer with
+  the amount, including its sign" — answered `-35,01` on three runs out of three,
+  where the wording it replaced answered `35,01` on three out of three.
+
+The wording was compared against the one it replaces on all 40 pages of
+`tests/testdata`, one run each. Three answers changed: this refund, `GuSp_SoLa2025_
+Abzeichen_plus_Versand_Lux-1` page 1 (`NONE` -> `134,60`, which is the total
+printed on that page) and `GuSp_SoLa2025_Lebensmittel_Rechnungen` page 21 (`5,70`
+-> `55,30`, the expectation). The other 37 were byte-identical. Three runs each on
+those three, and on the two Lebensmittel pages that the question has been measured
+contradicting itself on, held the new answers.
+
+A sign bullet in the total question's system prompt was tried at the same time and
+thrown away: with it and without it the answers were byte-identical on the refund
+and on two ordinary receipts, three runs each. `x/totalprobe.py` is the probe that
+produced all of this, kept for the next wording.
+
+**What is still wrong.** The extraction reply drops the sign on this receipt
+whatever the wording, so the negative total comes from the question, is not believed
+until a second asking agrees, and is announced — the log warns that the `SUMME` line
+reads `-35.01` where the reply carried `35.01`, and the bill carries a note saying
+the total came from that line. A refund whose paper has no line the shop labels as a
+total therefore still comes out positive, because the question answers `NONE` and
+the reply's signless amount is what stands. `kPromptVersion` is 11: a stored total
+for such a receipt is the amount paid out with the sign of a purchase.
+
 ### Handwriting on a printed bill
 
 The extraction prompt says that a machine printed bill is read from its printed
